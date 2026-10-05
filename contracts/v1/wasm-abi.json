@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "inputFormat": "json",
+  "outputFormat": "json",
+  "exports": {
+    "memory": "memory",
+    "allocate": "alloc",
+    "invoke": "invoke"
+  },
+  "resultEncoding": "i64:high32=length,low32=pointer",
+  "hostModules": [],
+  "limits": {
+    "maxInputBytes": 1048576,
+    "maxOutputBytes": 1048576,
+    "maxModuleBytes": 16777216,
+    "maxMemoryPages": 1024,
+    "maxDurationMillis": 5000
+  }
+}

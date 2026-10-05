@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://liapoldus.github.io/spec/runtime/v1/settings.schema.json",
+  "title": "Runtime v1 settings",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "groupId", "modelInstanceId", "module", "commands"],
+  "properties": {
+    "schemaVersion": { "const": "1" },
+    "groupId": { "$ref": "#/$defs/identifier" },
+    "modelInstanceId": { "$ref": "#/$defs/identifier" },
+    "module": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha256"],
+      "properties": { "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" } }
+    },
+    "commands": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "export", "tenantSites", "entities"],
+        "properties": {
+          "name": { "$ref": "#/$defs/identifier" },
+          "export": { "$ref": "#/$defs/identifier" },
+          "tenantSites": { "type": "array", "minItems": 1, "maxItems": 256, "uniqueItems": true, "items": { "type": "string", "pattern": "^[A-Za-z0-9_-]+/[A-Za-z0-9_-]+$" } },
+          "entities": { "type": "array", "minItems": 1, "maxItems": 128, "uniqueItems": true, "items": { "$ref": "#/$defs/identifier" } }
+        }
+      }
+    }
+  },
+  "$defs": { "identifier": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$" } }
+}

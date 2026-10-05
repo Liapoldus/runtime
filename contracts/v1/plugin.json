@@ -1,0 +1,11 @@
+{
+  "name": "runtime",
+  "configuration": {
+    "schemaVersion": "1",
+    "schema": "contracts/v1/settings.schema.json"
+  },
+  "capabilities": [
+    { "name": "runtime.invoke", "mode": "call" },
+    { "name": "runtime.http", "mode": "call" }
+  ]
+}
