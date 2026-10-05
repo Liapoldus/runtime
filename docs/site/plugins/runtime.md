@@ -3,7 +3,7 @@
 Runtime — отдельный плагин исполнения объявленных WASM-команд. Core хранит
 точные байты JSON-конфигурации, вызывает Plugin SDK REST `Reload`; экземпляр
 Runtime сам получает поколение, валидирует его и атомарно активирует после
-проверки всех указанных module digests. [Нормативная схема настроек](../../../contracts/v1/settings.schema.json)
+проверки всех указанных module digests. [Нормативная схема настроек](https://github.com/Liapoldus/runtime/blob/main/contracts/v1/settings.schema.json)
 принадлежит этому репозиторию.
 
 Каждая Runtime-группа — отдельная единица развёртывания и масштабирования.
@@ -12,7 +12,7 @@ artifact digest и список команд. Каждая команда доп
 tenant/site scopes и сущности; host передаёт доверенный scope из caller context,
 а не из произвольного WASM payload.
 
-WASM запускается через wazero с [версионированным JSON input/output ABI](../../../contracts/v1/wasm-abi.json):
+WASM запускается через wazero с [версионированным JSON input/output ABI](https://github.com/Liapoldus/runtime/blob/main/contracts/v1/wasm-abi.json):
 module экспортирует `memory`, `alloc(length) → pointer` и
 `invoke(pointer, length) → i64`, где старшие 32 бита результата содержат
 длину, младшие — адрес JSON-ответа. Вызов ограничен временем, объёмом
@@ -26,7 +26,7 @@ terminal adapter. Одна транзакция ограничена одним 
 Сейчас реализованы проверка базовой конфигурации, bounded приём artifact с
 SHA-256 и компиляцией WASM, а также изолированный JSON ABI-вызов без host
 функций. Подключение приёма к Plugin SDK, продуктовые host-функции и
-peer-вызовы остаются в [TODO](../../../TODO.md); целевое
+peer-вызовы остаются в [TODO](https://github.com/Liapoldus/runtime/blob/main/TODO.md); целевое
 поведение документа не означает текущую production readiness. Все незавершённые
 пункты относятся к общему v2; `contracts/v1` — версия собственного контракта
 плагина, не обещание релиза Liapoldus v1.
