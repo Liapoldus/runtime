@@ -84,16 +84,17 @@ Core→SDK→Runtime→Server и полная sandbox/Domain conformance ост�
 `contracts/v1` обозначает первую версию контракта самого плагина, а не этап
 экосистемы.
 
-Milestone платформы перед production integration: интегрировать Runtime с
-совместимой published revision Plugin SDK. Текущий локальный SDK WIP уже
-содержит self-registration/lease, peer directory и compatibility metadata, но
-Core закреплён на опубликованном `v1.0.0`, где этих API нет; временный workspace
-не заменяет согласованную dependency revision и чистый build. Для Runtime также
-обязательны совместимость WASM ABI/artifact/settings/peer contracts и
-production cohort gate. Отдельные Runtime-группы масштабирует оператор; Core не
-запускает replicas и не интерпретирует WASM. Canary допускается только при
-совместимых когортах и подтверждённом traffic weight; неизвестный результат
-`runtime.invoke` не replay-ится.
+Milestone платформы перед production integration: Runtime пока закреплён на
+Plugin SDK `v1.0.0`, тогда как Core уже перешёл на опубликованный `v1.1.0` с
+self-registration/lease, peer directory и compatibility metadata. Независимая
+Runtime сборка проходит на текущем pin, но production lifecycle integration
+должна перейти на совместимую опубликованную immutable revision и пройти
+сквозной Core→SDK→Runtime process gate; workspace-only dependency не является
+release evidence. Также обязательны совместимость WASM ABI/artifact/settings/
+peer contracts и production cohort gate. Отдельные Runtime-группы масштабирует
+оператор; Core не запускает replicas и не интерпретирует WASM. Canary допускается
+только при совместимых когортах и подтверждённом traffic weight; неизвестный
+результат `runtime.invoke` не replay-ится.
 
 - [ ] Gate платформы: lease expiry, новая incarnation, совместимость WASM ABI
   при rolling/canary, drain длинного вызова и отказ при несовместимом artifact.
