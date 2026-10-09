@@ -1,0 +1,208 @@
+{
+  "$id": "https://liapoldus.github.io/plugins/runtime/admin-ui/v1/schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "pages": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "capability": {
+            "const": "runtime.modules.list"
+          },
+          "id": {
+            "const": "modules"
+          },
+          "permissions": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "sections": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "actions": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "artifactInput": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "maxBytes": {
+                            "const": 16777216
+                          },
+                          "maxMetadataBytes": {
+                            "const": 65536
+                          },
+                          "maxMultipartOverheadBytes": {
+                            "const": 65536
+                          },
+                          "mediaTypes": {
+                            "const": [
+                              "application/wasm"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "mediaTypes",
+                          "maxBytes",
+                          "maxMetadataBytes",
+                          "maxMultipartOverheadBytes"
+                        ],
+                        "type": "object"
+                      },
+                      "capability": {
+                        "const": "runtime.modules.publish"
+                      },
+                      "confirmation": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "id": {
+                        "const": "publish"
+                      },
+                      "inputSchema": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "additionalProperties": {
+                            "const": false
+                          },
+                          "properties": {
+                            "additionalProperties": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "maxLength": {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "minLength": {
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "type": {
+                                  "const": "string"
+                                }
+                              },
+                              "required": [
+                                "type"
+                              ],
+                              "type": "object"
+                            },
+                            "type": "object"
+                          },
+                          "required": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array",
+                            "uniqueItems": true
+                          },
+                          "type": {
+                            "const": "object"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "properties",
+                          "required",
+                          "additionalProperties"
+                        ],
+                        "type": "object"
+                      },
+                      "title": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "title",
+                      "capability",
+                      "confirmation",
+                      "inputSchema",
+                      "artifactInput"
+                    ],
+                    "type": "object"
+                  },
+                  "minItems": 1,
+                  "type": "array"
+                },
+                "columns": {
+                  "const": [
+                    "sha256",
+                    "sizeBytes"
+                  ]
+                },
+                "dataCapability": {
+                  "const": "runtime.modules.list"
+                },
+                "id": {
+                  "const": "modules"
+                },
+                "kind": {
+                  "const": "table"
+                },
+                "title": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "kind",
+                "title",
+                "dataCapability",
+                "columns",
+                "actions"
+              ],
+              "type": "object"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "title": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "capability",
+          "permissions",
+          "sections"
+        ],
+        "type": "object"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "plugin": {
+      "const": "runtime"
+    },
+    "requiredCapabilities": {
+      "items": {
+        "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$",
+        "type": "string"
+      },
+      "minItems": 1,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "version": {
+      "const": 1
+    }
+  },
+  "required": [
+    "version",
+    "plugin",
+    "requiredCapabilities",
+    "pages"
+  ],
+  "title": "Runtime plugin Admin Surface v1",
+  "type": "object"
+}

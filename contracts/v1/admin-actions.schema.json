@@ -1,0 +1,205 @@
+{
+  "$defs": {
+    "errors": {
+      "additionalProperties": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "http": {
+            "maximum": 599,
+            "minimum": 400,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "http",
+          "code"
+        ],
+        "type": "object"
+      },
+      "minProperties": 1,
+      "type": "object"
+    }
+  },
+  "$id": "https://liapoldus.github.io/plugins/runtime/admin-actions/v1/schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "runtime.modules.list": {
+      "additionalProperties": false,
+      "properties": {
+        "errors": {
+          "$ref": "#/$defs/errors"
+        },
+        "httpStatus": {
+          "const": 200
+        },
+        "kind": {
+          "const": "query"
+        },
+        "ownership": {
+          "const": "plugin-admin-surface-capability"
+        },
+        "requestSchema": {
+          "type": "object"
+        },
+        "responseSchema": {
+          "type": "object"
+        },
+        "surfaceBinding": {
+          "additionalProperties": false,
+          "properties": {
+            "page": {
+              "const": "modules"
+            },
+            "section": {
+              "const": "modules"
+            }
+          },
+          "required": [
+            "page",
+            "section"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind",
+        "ownership",
+        "surfaceBinding",
+        "requestSchema",
+        "responseSchema",
+        "httpStatus",
+        "errors"
+      ],
+      "type": "object"
+    },
+    "runtime.modules.publish": {
+      "additionalProperties": false,
+      "properties": {
+        "acceptedHttpStatus": {
+          "const": 202
+        },
+        "archiveLimits": {
+          "additionalProperties": false,
+          "properties": {
+            "artifactBytes": {
+              "const": 16777216
+            },
+            "mediaType": {
+              "const": "application/wasm"
+            },
+            "metadataBytes": {
+              "const": 65536
+            },
+            "minArtifactBytes": {
+              "const": 1
+            },
+            "multipartOverheadBytes": {
+              "const": 65536
+            }
+          },
+          "required": [
+            "mediaType",
+            "minArtifactBytes",
+            "artifactBytes",
+            "metadataBytes",
+            "multipartOverheadBytes"
+          ],
+          "type": "object"
+        },
+        "errors": {
+          "$ref": "#/$defs/errors"
+        },
+        "idempotency": {
+          "type": "object"
+        },
+        "kind": {
+          "const": "artifact-action"
+        },
+        "metadataSchema": {
+          "const": "contracts/v1/module-artifact-metadata.schema.json"
+        },
+        "multipart": {
+          "additionalProperties": false,
+          "properties": {
+            "artifactFilenameForwarded": {
+              "const": false
+            },
+            "order": {
+              "const": [
+                "metadata",
+                "artifact"
+              ]
+            },
+            "parts": {
+              "const": [
+                "metadata",
+                "artifact"
+              ]
+            }
+          },
+          "required": [
+            "parts",
+            "order",
+            "artifactFilenameForwarded"
+          ],
+          "type": "object"
+        },
+        "ownership": {
+          "const": "plugin-admin-surface-action"
+        },
+        "receiptSchema": {
+          "const": "contracts/v1/module-artifact-receipt.schema.json"
+        },
+        "surfaceBinding": {
+          "additionalProperties": false,
+          "properties": {
+            "action": {
+              "const": "publish"
+            },
+            "page": {
+              "const": "modules"
+            },
+            "section": {
+              "const": "modules"
+            }
+          },
+          "required": [
+            "page",
+            "section",
+            "action"
+          ],
+          "type": "object"
+        },
+        "transport": {
+          "const": "plugin-sdk.rest.artifact-stream"
+        }
+      },
+      "required": [
+        "kind",
+        "ownership",
+        "surfaceBinding",
+        "transport",
+        "multipart",
+        "acceptedHttpStatus",
+        "receiptSchema",
+        "archiveLimits",
+        "metadataSchema",
+        "idempotency",
+        "errors"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "runtime.modules.list",
+    "runtime.modules.publish"
+  ],
+  "title": "Runtime plugin Admin Actions v1",
+  "type": "object"
+}

@@ -1,0 +1,126 @@
+{
+  "runtime.modules.list": {
+    "errors": {
+      "invalid_input": {
+        "http": 400,
+        "code": "invalid_input"
+      },
+      "unavailable": {
+        "http": 503,
+        "code": "unavailable"
+      }
+    },
+    "httpStatus": 200,
+    "kind": "query",
+    "ownership": "plugin-admin-surface-capability",
+    "requestSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "responseSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "sha256": {
+                "pattern": "^[a-f0-9]{64}$",
+                "type": "string"
+              },
+              "sizeBytes": {
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "sha256",
+              "sizeBytes"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "nextCursor": {
+          "type": "null"
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "type": "object"
+    },
+    "surfaceBinding": {
+      "page": "modules",
+      "section": "modules"
+    }
+  },
+  "runtime.modules.publish": {
+    "acceptedHttpStatus": 202,
+    "archiveLimits": {
+      "artifactBytes": 16777216,
+      "mediaType": "application/wasm",
+      "metadataBytes": 65536,
+      "minArtifactBytes": 1,
+      "multipartOverheadBytes": 65536
+    },
+    "errors": {
+      "artifact_too_large": {
+        "http": 413,
+        "code": "artifact_too_large"
+      },
+      "digest_mismatch": {
+        "http": 409,
+        "code": "digest_mismatch"
+      },
+      "invalid_input": {
+        "http": 400,
+        "code": "invalid_input"
+      },
+      "invalid_module": {
+        "http": 422,
+        "code": "invalid_module"
+      },
+      "unavailable": {
+        "http": 503,
+        "code": "unavailable"
+      }
+    },
+    "idempotency": {
+      "required": true,
+      "sameInput": "no-op",
+      "scope": [
+        "plugin-instance",
+        "capability",
+        "idempotency-key"
+      ],
+      "semantics": "content-addressed"
+    },
+    "kind": "artifact-action",
+    "metadataSchema": "contracts/v1/module-artifact-metadata.schema.json",
+    "multipart": {
+      "artifactFilenameForwarded": false,
+      "order": [
+        "metadata",
+        "artifact"
+      ],
+      "parts": [
+        "metadata",
+        "artifact"
+      ]
+    },
+    "ownership": "plugin-admin-surface-action",
+    "receiptSchema": "contracts/v1/module-artifact-receipt.schema.json",
+    "surfaceBinding": {
+      "page": "modules",
+      "section": "modules",
+      "action": "publish"
+    },
+    "transport": "plugin-sdk.rest.artifact-stream"
+  }
+}

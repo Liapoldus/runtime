@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "capability": "runtime.invoke",
+  "semantics": "Один транспортный вызов выполняется ровно один раз. Результат, не полученный из-за транспортной ошибки или отмены, считается неизвестным и никогда не воспроизводится автоматически (replay отсутствует). Тело ответа несёт только код ошибки и никогда не раскрывает содержимое исполнения (трапов, payloads, инвариантов).",
+  "errors": {
+    "cancelled": {
+      "http": 499,
+      "retryable": false
+    },
+    "execution_failed": {
+      "http": 502,
+      "retryable": false
+    },
+    "execution_timeout": {
+      "http": 504,
+      "retryable": false
+    },
+    "forbidden_entity": {
+      "http": 403,
+      "retryable": false
+    },
+    "forbidden_scope": {
+      "http": 403,
+      "retryable": false
+    },
+    "invalid_request": {
+      "http": 422,
+      "retryable": false
+    },
+    "not_ready": {
+      "http": 503,
+      "retryable": true
+    },
+    "payload_too_large": {
+      "http": 413,
+      "retryable": false
+    },
+    "unknown_command": {
+      "http": 404,
+      "retryable": false
+    }
+  }
+}

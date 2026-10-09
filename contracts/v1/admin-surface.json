@@ -1,0 +1,60 @@
+{
+  "pages": [
+    {
+      "capability": "runtime.modules.list",
+      "id": "modules",
+      "permissions": [
+        "plugins.runtime.modules.manage"
+      ],
+      "sections": [
+        {
+          "actions": [
+            {
+              "artifactInput": {
+                "maxBytes": 16777216,
+                "maxMetadataBytes": 65536,
+                "maxMultipartOverheadBytes": 65536,
+                "mediaTypes": [
+                  "application/wasm"
+                ]
+              },
+              "capability": "runtime.modules.publish",
+              "confirmation": "Проверить digest и ABI, затем сохранить модуль как неизменяемый артефакт?",
+              "id": "publish",
+              "inputSchema": {
+                "additionalProperties": false,
+                "properties": {
+                  "sha256": {
+                    "maxLength": 64,
+                    "minLength": 64,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "sha256"
+                ],
+                "type": "object"
+              },
+              "title": "Загрузить WASM-модуль"
+            }
+          ],
+          "columns": [
+            "sha256",
+            "sizeBytes"
+          ],
+          "dataCapability": "runtime.modules.list",
+          "id": "modules",
+          "kind": "table",
+          "title": "Неизменяемые модули"
+        }
+      ],
+      "title": "WASM-модули"
+    }
+  ],
+  "plugin": "runtime",
+  "requiredCapabilities": [
+    "runtime.modules.list",
+    "runtime.modules.publish"
+  ],
+  "version": 1
+}

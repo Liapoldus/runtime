@@ -1,11 +1,20 @@
 {
-  "name": "runtime",
-  "configuration": {
-    "schemaVersion": "1",
-    "schema": "contracts/v1/settings.schema.json"
+  "adminSurface": {
+    "actions": "contracts/v1/admin-actions.json",
+    "actionsSchema": "contracts/v1/admin-actions.schema.json",
+    "descriptor": "contracts/v1/admin-surface.json",
+    "schema": "contracts/v1/admin-surface.schema.json",
+    "version": 1
   },
   "capabilities": [
-    { "name": "runtime.invoke", "mode": "call" },
-    { "name": "runtime.http", "mode": "call" }
-  ]
+    {
+      "mode": "call",
+      "name": "runtime.invoke"
+    }
+  ],
+  "configuration": {
+    "schema": "contracts/v1/settings.schema.json",
+    "schemaVersion": "1"
+  },
+  "name": "runtime"
 }

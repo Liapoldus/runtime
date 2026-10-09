@@ -1,3 +1,4 @@
+// Package models defines Runtime configuration and artifact values.
 package models
 
 type Command struct {

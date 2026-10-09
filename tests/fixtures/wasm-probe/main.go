@@ -5,19 +5,30 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"time"
 
 	"github.com/Liapoldus/runtime/internal/infrastructure/wasm"
 )
 
 func main() {
 	var request struct {
-		WASM  []byte          `json:"wasm"`
-		Input json.RawMessage `json:"input"`
+		WASM              []byte          `json:"wasm"`
+		Input             json.RawMessage `json:"input"`
+		Cancel            bool            `json:"cancel"`
+		CancelAfterMillis int             `json:"cancelAfterMillis"`
 	}
 	if err := json.NewDecoder(os.Stdin).Decode(&request); err != nil {
 		os.Exit(2)
 	}
-	output, err := (wasm.Executor{}).Execute(context.Background(), request.WASM, request.Input)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if request.Cancel {
+		cancel()
+	}
+	if request.CancelAfterMillis > 0 {
+		time.AfterFunc(time.Duration(request.CancelAfterMillis)*time.Millisecond, cancel)
+	}
+	output, err := (wasm.Executor{}).Execute(ctx, request.WASM, request.Input)
 	response := struct {
 		Output json.RawMessage `json:"output,omitempty"`
 		Error  string          `json:"error,omitempty"`
@@ -32,6 +43,10 @@ func main() {
 			response.Error = "invalid_json"
 		case errors.Is(err, wasm.ErrInvalidModule):
 			response.Error = "invalid_module"
+		case errors.Is(err, wasm.ErrExecutionTimeout):
+			response.Error = "execution_timeout"
+		case errors.Is(err, context.Canceled):
+			response.Error = "cancelled"
 		default:
 			response.Error = "execution_failed"
 		}

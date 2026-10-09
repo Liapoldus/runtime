@@ -2,13 +2,32 @@
   "version": 1,
   "inputFormat": "json",
   "outputFormat": "json",
+  "resultEncoding": "i64:high32=length,low32=pointer",
+  "hostModules": [],
   "exports": {
     "memory": "memory",
     "allocate": "alloc",
     "invoke": "invoke"
   },
-  "resultEncoding": "i64:high32=length,low32=pointer",
-  "hostModules": [],
+  "signatures": {
+    "allocate": {
+      "parameters": [
+        "i32"
+      ],
+      "results": [
+        "i32"
+      ]
+    },
+    "invoke": {
+      "parameters": [
+        "i32",
+        "i32"
+      ],
+      "results": [
+        "i64"
+      ]
+    }
+  },
   "limits": {
     "maxInputBytes": 1048576,
     "maxOutputBytes": 1048576,
