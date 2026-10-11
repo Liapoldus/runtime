@@ -2,74 +2,75 @@ package config_test
 
 import (
 	"fmt"
-	application "github.com/Liapoldus/runtime/internal/application/config"
-	"github.com/Liapoldus/runtime/internal/domain/models"
 	"strings"
 	"testing"
+
+	application "github.com/Liapoldus/runtime/internal/application/config"
+	"github.com/Liapoldus/runtime/internal/domain/models"
 )
 
-func TestConfigurationValidationTokensAndBounds(t *testing.T) {
-	valid := func() models.Configuration {
-		return models.Configuration{SchemaVersion: "1", GroupID: "group", ModelInstanceID: "model", Module: models.Module{SHA256: strings.Repeat("a", 64)}, Commands: []models.Command{{Name: "run", Export: "invoke", TenantSites: []string{"tenant/site"}, Entities: []string{"entry"}}}}
-	}
+func TestConfigurationValidationBoundsAndRoutes(t *testing.T) {
+	valid := func() models.Configuration { return validConfiguration() }
 	for _, test := range []struct {
 		name   string
 		mutate func(*models.Configuration)
 		want   string
 	}{
 		{"valid", func(*models.Configuration) {}, ""},
-		{"version", func(c *models.Configuration) { c.SchemaVersion = "2" }, "invalid_configuration"},
-		{"digest", func(c *models.Configuration) { c.Module.SHA256 = strings.Repeat("A", 64) }, "invalid_digest"},
-		{"command", func(c *models.Configuration) { c.Commands[0].Export = "bad-export" }, "invalid_command"},
-		{"missing scope", func(c *models.Configuration) { c.Commands[0].TenantSites = nil }, "missing_scope"},
-		{"scope", func(c *models.Configuration) { c.Commands[0].TenantSites = []string{"tenant/site/extra"} }, "invalid_scope"},
-		{"duplicate", func(c *models.Configuration) { c.Commands = append(c.Commands, c.Commands[0]) }, "duplicate_command"},
-		{"identifier at bound", func(c *models.Configuration) { c.GroupID = strings.Repeat("a", 64) }, ""},
-		{"identifier over bound", func(c *models.Configuration) { c.GroupID = strings.Repeat("a", 65) }, "invalid_configuration"},
+		{"version", func(c *models.Configuration) { c.SchemaVersion = "1" }, "invalid_configuration"},
+		{"invalid digest", func(c *models.Configuration) { c.Modules[0].SHA256 = strings.Repeat("A", 64) }, "invalid_digest"},
+		{"invalid module id", func(c *models.Configuration) { c.Modules[0].ID = "bad-id" }, "invalid_configuration"},
+		{"invalid command", func(c *models.Configuration) { c.Commands[0].Export = "bad-export" }, "invalid_command"},
+		{"duplicate command", func(c *models.Configuration) { c.Commands = append(c.Commands, c.Commands[0]) }, "duplicate_command"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			config := valid()
-			test.mutate(&config)
-			if got := application.ValidateConfiguration(config); got != test.want {
+			candidate := valid()
+			test.mutate(&candidate)
+			if got := application.ValidateConfiguration(candidate); got != test.want {
 				t.Fatalf("got %q; want %q", got, test.want)
 			}
 		})
 	}
-	for _, kind := range []string{"commands", "entities", "scopes"} {
-		bound, overCode := 128, "invalid_command"
-		if kind == "commands" {
-			overCode = "invalid_configuration"
+	for _, kind := range []string{"commands", "modules", "calls"} {
+		bound := 128
+		if kind == "modules" {
+			bound = 64
 		}
-		if kind == "scopes" {
-			bound, overCode = 256, "missing_scope"
+		if kind == "calls" {
+			bound = 64
 		}
 		for _, size := range []int{bound, bound + 1} {
-			config := valid()
-			base := config.Commands[0]
+			candidate := valid()
 			switch kind {
 			case "commands":
-				config.Commands = nil
+				candidate.Commands = nil
 				for i := range size {
-					command := base
-					command.Name = fmt.Sprintf("run_%d", i)
-					config.Commands = append(config.Commands, command)
+					candidate.Commands = append(candidate.Commands, models.Command{Name: fmt.Sprintf("run_%d", i), ModuleID: "forms", Export: "invoke", Entities: []string{"entry"}})
 				}
-			case "entities":
-				config.Commands[0].Entities = nil
+			case "modules":
+				candidate.Commands = candidate.Commands[:1]
+				candidate.Modules = nil
 				for i := range size {
-					config.Commands[0].Entities = append(config.Commands[0].Entities, fmt.Sprintf("entry_%d", i))
+					id := fmt.Sprintf("module_%d", i)
+					if i == 0 {
+						id = "forms"
+					}
+					candidate.Modules = append(candidate.Modules, models.Module{ID: id, SHA256: fmt.Sprintf("%064x", i+1)})
 				}
-			case "scopes":
-				config.Commands[0].TenantSites = nil
+			case "calls":
+				candidate.Commands[0].Calls = nil
 				for i := range size {
-					config.Commands[0].TenantSites = append(config.Commands[0].TenantSites, fmt.Sprintf("tenant/site_%d", i))
+					candidate.Commands[0].Calls = append(candidate.Commands[0].Calls, models.PluginMethod{Plugin: "domain", Method: fmt.Sprintf("domain.method_%d", i)})
 				}
 			}
 			want := ""
 			if size > bound {
-				want = overCode
+				want = "invalid_command"
+				if kind == "modules" || kind == "commands" {
+					want = "invalid_configuration"
+				}
 			}
-			if got := application.ValidateConfiguration(config); got != want {
+			if got := application.ValidateConfiguration(candidate); got != want {
 				t.Fatalf("%s size %d: got %q; want %q", kind, size, got, want)
 			}
 		}

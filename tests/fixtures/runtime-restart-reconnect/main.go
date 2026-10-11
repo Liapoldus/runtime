@@ -27,11 +27,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	sdkmodels "github.com/Liapoldus/plugin-sdk/domain/models"
-	"github.com/Liapoldus/plugin-sdk/infrastructure"
+	sdkmodels "github.com/Liapoldus/plugin-sdk/v2/domain/models"
+	"github.com/Liapoldus/plugin-sdk/v2/infrastructure"
 	"github.com/Liapoldus/runtime/contracts"
 	"github.com/Liapoldus/runtime/internal/domain/models"
 	"github.com/Liapoldus/runtime/internal/infrastructure/artifacts"
+	"github.com/Liapoldus/runtime/tests/fixtures/lifecyclecore"
 )
 
 var errScenario = errors.New("runtime restart/reconnect integration scenario failed")
@@ -42,9 +43,11 @@ const (
 	coreCN         = "runtime-test-core"
 	runtimeCN      = "runtime-test-plugin"
 	callerCN       = "runtime-test-caller"
-	runtimePeerURI = "spiffe://liapoldus.test/runtime"
+	runtimePeerURI = "spiffe://liapoldus/plugin/runtime-restart-e2e/runtime-restart-e2e-1/inc-runtime"
+	placementID    = "node-runtime"
+	incarnationID  = "inc-runtime"
 	callerPeerURI  = "spiffe://liapoldus.test/server"
-	schemaV1       = "1"
+	schemaVersion  = "2"
 )
 
 type storedGeneration struct {
@@ -151,9 +154,13 @@ func run() error {
 	if err != nil {
 		return errScenario
 	}
+	coreHandler, err := core.handler()
+	if err != nil {
+		return errScenario
+	}
 	coreServer := &http.Server{
 		ReadHeaderTimeout: 5 * time.Second,
-		Handler:           core.handler(),
+		Handler:           coreHandler,
 		TLSConfig: &tls.Config{
 			MinVersion:   contract.TransportSecurity.MinimumTLSVersion,
 			Certificates: []tls.Certificate{coreCertificate},
@@ -342,6 +349,8 @@ func startRuntime(binary, artifactDir string, credentials testCredentials, coreU
 		"--core-peer-cn", coreCN,
 		"--instance-id", instanceID,
 		"--replica-id", replicaID,
+		"--placement-id", placementID,
+		"--incarnation-id", incarnationID,
 		"--tls-ca-file", credentials.caFile,
 		"--tls-server-cert-file", credentials.runtimeServerCert,
 		"--tls-server-key-file", credentials.runtimeServerKey,
@@ -350,6 +359,8 @@ func startRuntime(binary, artifactDir string, credentials testCredentials, coreU
 		"--tls-crl-file", credentials.crlFile,
 		"--artifact-dir", artifactDir,
 		"--peer-listen", "127.0.0.1:0",
+		"--rest-advertise-url", "https://127.0.0.1:443",
+		"--peer-advertise-endpoint", "127.0.0.1:443",
 		"--peer-identity", runtimePeerURI,
 		"--peer-allowed-caller", callerPeerURI,
 		"--peer-ca-file", credentials.caFile,
@@ -438,8 +449,13 @@ func newClient(contract infrastructure.HTTPContract, credentials testCredentials
 	return client, nil
 }
 
-func (core *scenario) handler() http.Handler {
+func (core *scenario) handler() (http.Handler, error) {
 	mux := http.NewServeMux()
+	lifecycleContract, err := infrastructure.LoadReplicaLifecycleContract()
+	if err != nil {
+		return nil, err
+	}
+	lifecyclecore.New(lifecycleContract).Register(mux)
 	pull := core.contract.Core.ConfigPull
 	mux.HandleFunc(pull.Method+" "+pull.PathTemplate, func(writer http.ResponseWriter, request *http.Request) {
 		if core.down.Load() {
@@ -454,7 +470,7 @@ func (core *scenario) handler() http.Handler {
 		headers := pull.ResponseHeaders
 		writer.Header().Set(headers["generation"], request.PathValue("generation"))
 		writer.Header().Set(headers["sha256"], generation.digest)
-		writer.Header().Set(headers["schemaVersion"], schemaV1)
+		writer.Header().Set(headers["schemaVersion"], schemaVersion)
 		writer.Header().Set(headers["generationState"], "active")
 		writer.Header().Set("Content-Type", pull.ResponseMediaType)
 		writer.WriteHeader(http.StatusOK)
@@ -462,7 +478,7 @@ func (core *scenario) handler() http.Handler {
 			return
 		}
 	})
-	return mux
+	return mux, nil
 }
 
 func publish(document string) storedGeneration {
@@ -470,16 +486,16 @@ func publish(document string) storedGeneration {
 	return storedGeneration{bytes: bytes, digest: sdkmodels.Digest(bytes)}
 }
 
-func configurationDocument(groupID, moduleDigest string, invalid bool) string {
+func configurationDocument(_ string, moduleDigest string, invalid bool) string {
 	unknown := ""
 	if invalid {
 		unknown = `,"unknown":true`
 	}
-	return fmt.Sprintf(`{"schemaVersion":"1","groupId":%q,"modelInstanceId":"domain","module":{"sha256":%q},"commands":[{"name":"submit","export":"invoke","tenantSites":["tenant/site"],"entities":["entries"]}]%s}`, groupID, moduleDigest, unknown)
+	return fmt.Sprintf(`{"schemaVersion":"2","modules":[{"moduleId":"app","sha256":%q}],"commands":[{"name":"submit","moduleId":"app","export":"invoke","entities":["entries"]}]%s}`, moduleDigest, unknown)
 }
 
 func descriptor(generation string, stored storedGeneration) sdkmodels.Reload {
-	return sdkmodels.Reload{Generation: generation, SHA256: stored.digest, SchemaVersion: schemaV1}
+	return sdkmodels.Reload{Generation: generation, SHA256: stored.digest, SchemaVersion: schemaVersion}
 }
 
 func repositoryRoot() string {

@@ -122,7 +122,7 @@
           "const": "artifact-action"
         },
         "metadataSchema": {
-          "const": "contracts/v1/module-artifact-metadata.schema.json"
+          "const": "contracts/v2/module-artifact-metadata.schema.json"
         },
         "multipart": {
           "additionalProperties": false,
@@ -154,7 +154,7 @@
           "const": "plugin-admin-surface-action"
         },
         "receiptSchema": {
-          "const": "contracts/v1/module-artifact-receipt.schema.json"
+          "const": "contracts/v2/module-artifact-receipt.schema.json"
         },
         "surfaceBinding": {
           "additionalProperties": false,

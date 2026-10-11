@@ -1,9 +1,11 @@
 {
-  "version": 1,
+  "version": 2,
   "inputFormat": "json",
   "outputFormat": "json",
   "resultEncoding": "i64:high32=length,low32=pointer",
-  "hostModules": [],
+  "hostModules": [
+    "liapoldus.plugin.v2"
+  ],
   "exports": {
     "memory": "memory",
     "allocate": "alloc",
@@ -32,6 +34,9 @@
     "maxInputBytes": 1048576,
     "maxOutputBytes": 1048576,
     "maxModuleBytes": 16777216,
+    "maxGenerationArtifactBytes": 134217728,
+    "maxHostCallBytes": 262144,
+    "maxHostCalls": 32,
     "maxMemoryPages": 1024,
     "maxDurationMillis": 5000
   }

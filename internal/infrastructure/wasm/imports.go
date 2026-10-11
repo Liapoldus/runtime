@@ -1,41 +1,62 @@
 // Package wasm executes isolated bounded Runtime modules.
 package wasm
 
-// rejectModuleImports enforces the current ABI's empty hostModules allow-list.
-// CompiledModule exposes imported functions and memories, but not imported
-// tables or globals, so the import vector must also be inspected before the
-// module is admitted or instantiated.
+// rejectModuleImports permits only the single versioned Runtime host function.
 func rejectModuleImports(module []byte) error {
-	hasImports, err := moduleHasImports(module)
-	if err != nil || hasImports {
+	if len(module) < 8 {
 		return ErrInvalidABI
 	}
-	return nil
-}
-
-func moduleHasImports(module []byte) (bool, error) {
-	if len(module) < 8 {
-		return false, ErrInvalidABI
-	}
 	offset := 8 // WASM magic and version
+	foundImportSection := false
 	for offset < len(module) {
 		sectionID := module[offset]
 		offset++
 		sectionSize, err := readWasmUint32(module, &offset, len(module))
 		if err != nil || int64(sectionSize) > int64(len(module)-offset) {
-			return false, ErrInvalidABI
+			return ErrInvalidABI
 		}
 		sectionEnd := offset + int(sectionSize)
 		if sectionID == 2 {
-			importCount, err := readWasmUint32(module, &offset, sectionEnd)
-			if err != nil || offset > sectionEnd {
-				return false, ErrInvalidABI
+			if foundImportSection {
+				return ErrInvalidABI
 			}
-			return importCount != 0, nil
+			foundImportSection = true
+			importCount, err := readWasmUint32(module, &offset, sectionEnd)
+			if err != nil || importCount > 1 {
+				return ErrInvalidABI
+			}
+			if importCount == 1 {
+				moduleName, err := readWasmName(module, &offset, sectionEnd)
+				if err != nil {
+					return ErrInvalidABI
+				}
+				fieldName, err := readWasmName(module, &offset, sectionEnd)
+				if err != nil || offset >= sectionEnd || moduleName != "liapoldus.plugin.v2" || fieldName != "call" || module[offset] != 0 {
+					return ErrInvalidABI
+				}
+				offset++
+				if _, err := readWasmUint32(module, &offset, sectionEnd); err != nil {
+					return ErrInvalidABI
+				}
+			}
+			if offset != sectionEnd {
+				return ErrInvalidABI
+			}
 		}
 		offset = sectionEnd
 	}
-	return false, nil
+	return nil
+}
+
+func readWasmName(module []byte, offset *int, limit int) (string, error) {
+	length, err := readWasmUint32(module, offset, limit)
+	if err != nil || int64(length) > int64(limit-*offset) {
+		return "", ErrInvalidABI
+	}
+	end := *offset + int(length)
+	name := string(module[*offset:end])
+	*offset = end
+	return name, nil
 }
 
 func readWasmUint32(module []byte, offset *int, limit int) (uint32, error) {

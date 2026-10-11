@@ -2,49 +2,64 @@ package config_test
 
 import (
 	"encoding/json"
-	"github.com/Liapoldus/runtime/internal/application/config"
-	"github.com/Liapoldus/runtime/internal/domain/models"
 	"strings"
 	"testing"
+
+	"github.com/Liapoldus/runtime/internal/application/config"
+	"github.com/Liapoldus/runtime/internal/domain/models"
 )
 
-func TestDecodeConfiguration(t *testing.T) {
-	valid := func() models.Configuration {
-		return models.Configuration{SchemaVersion: "1", GroupID: "forms", ModelInstanceID: "model", Module: models.Module{SHA256: strings.Repeat("a", 64)}, Commands: []models.Command{{Name: "submit", Export: "invoke", TenantSites: []string{"tenant-a/site-1"}, Entities: []string{"entries"}}}}
+func validConfiguration() models.Configuration {
+	return models.Configuration{
+		SchemaVersion: "2",
+		Modules:       []models.Module{{ID: "forms", SHA256: strings.Repeat("a", 64)}, {ID: "notify", SHA256: strings.Repeat("b", 64)}},
+		Commands: []models.Command{
+			{Name: "submit", ModuleID: "forms", Export: "invoke", Entities: []string{"entries"}, Calls: []models.PluginMethod{{Plugin: "domain", Method: "domain.query"}}},
+			{Name: "alert", ModuleID: "notify", Export: "invoke", Entities: []string{"notifications"}},
+		},
 	}
-	for _, tc := range []struct {
+}
+
+func TestDecodeConfigurationRejectsOldScopeAndSingleModuleShapes(t *testing.T) {
+	valid := validConfiguration()
+	for _, test := range []struct {
 		name   string
 		change func(*models.Configuration)
 		want   string
 	}{
-		{"valid", func(*models.Configuration) {}, ""},
-		{"missing scope", func(c *models.Configuration) { c.Commands[0].TenantSites = nil }, "missing_scope"},
-		{"duplicate command", func(c *models.Configuration) { c.Commands = append(c.Commands, c.Commands[0]) }, "duplicate_command"},
-		{"invalid digest", func(c *models.Configuration) { c.Module.SHA256 = "../../module.wasm" }, "invalid_digest"},
-		{"invalid group", func(c *models.Configuration) { c.GroupID = "invalid-group" }, "invalid_configuration"},
+		{"valid multi-module routes", func(*models.Configuration) {}, ""},
+		{"missing module", func(c *models.Configuration) { c.Modules = nil }, "invalid_configuration"},
+		{"bad digest", func(c *models.Configuration) { c.Modules[0].SHA256 = "../../artifact" }, "invalid_digest"},
+		{"duplicate module id", func(c *models.Configuration) { c.Modules = append(c.Modules, c.Modules[0]) }, "invalid_configuration"},
+		{"unknown module route", func(c *models.Configuration) { c.Commands[0].ModuleID = "missing" }, "invalid_command"},
 		{"invalid export", func(c *models.Configuration) { c.Commands[0].Export = "invoke-now" }, "invalid_command"},
-		{"invalid scope", func(c *models.Configuration) { c.Commands[0].TenantSites = []string{"tenant.example/site"} }, "invalid_scope"},
-		{"duplicate scope", func(c *models.Configuration) { c.Commands[0].TenantSites = []string{"tenant/site", "tenant/site"} }, "invalid_scope"},
-		{"duplicate entity", func(c *models.Configuration) { c.Commands[0].Entities = []string{"entries", "entries"} }, "invalid_command"},
+		{"duplicate command", func(c *models.Configuration) { c.Commands = append(c.Commands, c.Commands[0]) }, "duplicate_command"},
+		{"duplicate plugin method", func(c *models.Configuration) {
+			c.Commands[0].Calls = append(c.Commands[0].Calls, c.Commands[0].Calls[0])
+		}, "invalid_command"},
+		{"malformed method", func(c *models.Configuration) { c.Commands[0].Calls[0].Method = "domain..query" }, "invalid_command"},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			candidate := valid()
-			tc.change(&candidate)
+		t.Run(test.name, func(t *testing.T) {
+			candidate := valid
+			candidate.Modules = append([]models.Module(nil), valid.Modules...)
+			candidate.Commands = append([]models.Command(nil), valid.Commands...)
+			candidate.Commands[0].Calls = append([]models.PluginMethod(nil), valid.Commands[0].Calls...)
+			test.change(&candidate)
 			raw, err := json.Marshal(candidate)
 			if err != nil {
 				t.Fatal(err)
 			}
 			_, code := config.DecodeConfiguration(raw)
-			if code != tc.want {
-				t.Fatalf("got %q, want %q", code, tc.want)
+			if code != test.want {
+				t.Fatalf("got %q, want %q", code, test.want)
 			}
 		})
 	}
-	raw, err := json.Marshal(valid())
+	raw, err := json.Marshal(valid)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, input := range []string{string(raw) + " {}", string(raw[:len(raw)-1]) + `,"unexpected":true}`, strings.Replace(string(raw), `"sha256":`, `"path":"/tmp/module.wasm","sha256":`, 1), "{", "null", "[]"} {
+	for _, input := range []string{string(raw) + " {}", string(raw[:len(raw)-1]) + `,"unexpected":true}`, strings.Replace(string(raw), `"modules"`, `"module"`, 1), "{", "null", "[]"} {
 		if _, code := config.DecodeConfiguration([]byte(input)); code != "invalid_configuration" {
 			t.Fatalf("unexpected result: %s", code)
 		}

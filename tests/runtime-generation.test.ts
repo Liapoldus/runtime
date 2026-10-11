@@ -27,14 +27,14 @@ describe('Runtime atomic configuration and WASM generation activation', () => {
         tamperedArtifactRejected: true,
         activePreservedBeforeCandidate: {
           generation: 'runtime-generation-1',
-          groupId: 'first',
+          moduleId: 'app',
           moduleDigest: expect.any(String) as unknown,
           moduleBytesMatchDigest: true,
         },
         candidateArtifactAccepted: true,
         activePairPromotedTogether: {
           generation: 'runtime-generation-2',
-          groupId: 'second',
+          moduleId: 'app',
           moduleDigest: expect.any(String) as unknown,
           moduleBytesMatchDigest: true,
         },

@@ -5,10 +5,10 @@
       "type": "string"
     }
   },
-  "$id": "https://liapoldus.github.io/spec/runtime/v1/invoke-request.schema.json",
+  "$id": "https://liapoldus.github.io/spec/runtime/v2/invoke-request.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Body of the runtime.invoke peer method. The host validates the declared scope and entities against the active command allowlist before any WASM execution.",
+  "description": "The command is mapped to one immutable moduleId and export. Entities may only narrow the command's configured allowlist; the host provides no caller-supplied tenant or site context.",
   "properties": {
     "command": {
       "$ref": "#/$defs/identifier"
@@ -18,21 +18,16 @@
         "$ref": "#/$defs/identifier"
       },
       "maxItems": 128,
-      "minItems": 1,
+      "minItems": 0,
       "type": "array",
       "uniqueItems": true
     },
-    "input": {},
-    "scope": {
-      "pattern": "^[A-Za-z0-9_-]+/[A-Za-z0-9_-]+$",
-      "type": "string"
-    }
+    "input": {}
   },
   "required": [
     "command",
-    "scope",
     "input"
   ],
-  "title": "Runtime v1 invoke request",
+  "title": "Runtime invoke request",
   "type": "object"
 }

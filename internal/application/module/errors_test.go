@@ -18,7 +18,6 @@ func TestInternalErrorTokensAndSentinelIdentity(t *testing.T) {
 	}{
 		{application.ErrInvokeNotReady, "not_ready"},
 		{application.ErrInvokeUnknownCommand, "unknown_command"},
-		{application.ErrInvokeForbiddenScope, "forbidden_scope"},
 		{application.ErrInvokeForbiddenEntity, "forbidden_entity"},
 		{application.ErrInvokeInvalidRequest, "invalid_request"},
 		{application.ErrInvokePayloadTooLarge, "payload_too_large"},

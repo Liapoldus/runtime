@@ -8,7 +8,7 @@ import (
 	"errors"
 	"io"
 
-	sdkpresentation "github.com/Liapoldus/plugin-sdk/presentation"
+	sdkpresentation "github.com/Liapoldus/plugin-sdk/v2/presentation"
 	"github.com/Liapoldus/runtime/contracts"
 	runtimemodule "github.com/Liapoldus/runtime/internal/application/module"
 	"github.com/Liapoldus/runtime/internal/domain/models"

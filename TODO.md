@@ -1,181 +1,271 @@
-# Runtime — задачи общего v2
+# Runtime v2 — production implementation gates
 
-## Cleanup/refactoring — 2026-10-09
+The repository is partway through the approved breaking transition in
+[`docs/site/plugins/runtime.md`](docs/site/plugins/runtime.md). Do not retain a
+parallel tenant-scope or no-host-call architecture.
 
-Четыре слоя сохранены; application разделён на config/ и module/, SDK admin
-adapter перенесён в presentation/admin/modules.go. Импорты composition,
-adapters и fixtures обновлены без compatibility aliases.
-Native definitions tests перенесены из tests/unit/ к владельцам. Configuration
-decode/store и artifact admission проверяются native tests рядом с кодом;
-три прежних TS wrappers и их Go probes заменены после успешного native прогона.
-Настоящие peer/lifecycle/sandbox E2E остаются в tests/.
+## P0 — contracts and configuration generation
 
-ABI, metadata, schemas и error/action artifacts теперь code-owned в contracts/
-и contracts/schema/. JSON loaders/embed/cache удалены. make generate
-детерминированно публикует весь contracts/v1/; make check-generated проверяет
-exact bytes и отсутствие лишних artifacts. Семантика всех 13 документов
-сверена с исходным WIP: значения, поля и limits сохранены; изменился формат
-canonical JSON, следовательно документные digests требуется получать из новых bytes.
+- [x] Re-inventory repository state, consumers, contracts and current CI while
+  preserving checkout WIP. Removal map: retired v1 WASM/admin contracts and
+  obsolete blocker document are deleted; settings now use the SDK v2 and
+  `pluginprotocol/v3` module paths; Core→SDK→Runtime→Domain and mock-Core
+  process fixtures cover the remaining consumers. Source searches found no
+  live single-module, OwnerGroup, delegated-scope or `domain.*`-only host-call
+  path; the remaining tenant/site phrase states that caller context is absent.
+  `make check` and `make check-race` are the current local gates; hosted OS/CI
+  remains open.
+- [x] Define versioned settings with a module catalog `moduleId → digest`,
+  commands mapped to `moduleId + export`, per-command entity restrictions and
+  per-command target-plugin/method allowlists. Remove tenant/site scope fields.
+- [x] Keep the published settings JSON Schema aligned with generic
+  `plugin.method` validation; do not restrict host-call methods to `domain.*`.
+  Regression verifies non-Domain methods are admitted while malformed or
+  multi-segment method names remain rejected.
+- [x] Validate artifact digests, ABI, configured export existence/signature and
+  target/method allowlist syntax before generation activation. The command's
+  configured export is passed to the executor, not replaced by the ABI default.
+- [x] Resolve host target authorization against the live Core caller→target
+  policy per call; absent or revoked links fail closed. Config activation does
+  not snapshot mutable Core links as permanent permission.
+- [x] Atomically activate settings, artifact set, routes and permissions. A
+  rejected candidate must leave the entire previous generation active.
+- [x] Migrate composition to the `plugin-sdk/v2` and generic
+  `pluginprotocol/v3` APIs. Independent `GOWORK=off` tests/build now pass using
+  published `v2.0.0`/`v3.0.0` tags without local replacements.
+- [x] Wire SDK replica registration, renewable Core lease and explicit
+  deregistration into the Runtime process using the peer certificate URI bound
+  to the immutable instance/replica/incarnation/placement identity. REST and
+  peer advertised endpoints are explicit required bootstrap inputs; a rejected
+  registration prevents startup, and a failed renewal fences the process for a
+  supervisor-issued new incarnation.
+- [x] Complete real-Core lifecycle acceptance for exact-generation pull,
+  ACK/readiness, fresh-incarnation restart/reconnect and coordinated drain.
+  The real Core→SDK→Domain→Runtime child-process acceptance now verifies
+  Runtime process restart under a fresh incarnation, exact-generation
+  reapplication and a successful host call after Domain also restarts. Explicit
+  deregistration is now asserted through Core's not-ready/drift status after
+  Runtime shutdown. Real Core rejection/recovery of a structurally valid but
+  semantically invalid module route is now covered, including the old active
+  generation, pending/not-ready status, and successful routing after the next
+  valid Core generation. A real Runtime child-process test now confirms an
+  admitted finite invocation completes while shutdown fences new calls;
+  the real Core→SDK→Runtime→Domain scenario also observes the Domain write from
+  an admitted WASM host call, sends SIGTERM, verifies a new call is fenced,
+  confirms the admitted call completes, then checks Core-visible deregistration.
+  This closes local real-Core process acceptance, not hosted OS or full lease-
+  failure/cancellation qualification.
 
-Root .golangci.yml: pinned v2.12.2, correctness/security/context/resource checks,
-без baseline/global exclusions. Typed ESLint включает unsafe/promise checks
-для handwritten TS/tests. make check последовательно проверяет generation,
-Go/TS lint, typecheck, native tests, полный Vitest, vet и build с GOWORK=off,
-GOFLAGS=-p=1. Linux/macOS CI блокируется при ошибке любого шага, включая race.
-Первый полный локальный gate до замены unit wrappers: PASS, 13 TS suites / 62 tests.
-Окончательный локальный gate после переноса unit tests — PASS (macOS ARM64,
-Go 1.26.0): `GOWORK=off GOFLAGS=-p=1 make check`. Generation/parity, pinned
-golangci-lint (0 issues), typed ESLint, typecheck, `go test ./... -count=1`,
-полный Vitest (10 files / 45 tests), `go vet ./...` и `go build ./...` прошли.
-Native race — PASS: `GOWORK=off GOFLAGS=-p=1 make check-race` (native step).
-Затем весь E2E suite отдельно прошёл с `GOWORK=off GOFLAGS='-p=1 -race'
-npm test -- --maxWorkers=1`: 10 files / 45 tests, включая race-enabled Runtime
-child processes. Оба шага включены в итоговый `make check-race` и CI.
-`git diff --check` — PASS. Это локальные результаты, не hosted acceptance.
-Повтор `npm ci`, ESLint/typecheck и `make check-generated` после проверки
-lockfile — PASS; npm сообщает 0 vulnerabilities.
+## P1 — isolated execution and plugin calls
 
-Изменённые пути cleanup:
+- [x] Support multiple immutable content-addressed WASM artifacts in one active
+  generation and route each command to its configured module/export.
+- [x] Instantiate fresh WASM execution state per invocation; only immutable
+  compiled module caching may cross calls. Bound module count, artifacts, memory,
+  input/output, concurrency, execution, host calls and total call chain.
+- [x] Add a versioned host ABI over generic `pluginprotocol` for bounded
+  synchronous request/response calls. Enforce the local per-command target/
+  method allowlist, host payload bounds, deadlines and cancellation.
+- [x] Connect host calls to the Core peer-directory resolver and authenticated
+  `pluginprotocol` dialer. Each call resolves one authorized target, validates
+  peer-contract compatibility/eligibility, pins the remote mTLS URI identity,
+  and does not retry. Runtime publishes its peer endpoint through Core replica
+  registration; the real Core directory delivery is verified by the current
+  `serve-domain` process acceptance.
+- [x] Verify a real Core→SDK→Runtime→Domain path using Runtime process mTLS
+  identity and Domain Core grants. The child-process test proves a Domain write
+  is denied without the grant, succeeds after a Core settings generation adds
+  it, and becomes visible to another authenticated plugin. Runtime sends no
+  tenant/site/group/OwnerGroup context.
+- [x] Add negative end-to-end cases for Runtime command entity/method narrowing
+  and Core link deletion. Separate Core grant enforcement remains proven by the
+  Domain-level deny/allow case above.
+- [x] Deny direct network/filesystem/WASI/environment imports. Extend module
+  admission and adversarial fixtures to cover each permitted host capability,
+  malformed inputs, reentrancy, cancellation, timeout, trap and resource limits.
+- [x] Never auto-replay side-effecting calls or unknown outcomes. No distributed
+  transaction across plugins; expose typed partial/unknown outcome to the caller.
 
-| Область | Пути |
-| --- | --- |
-| Application | `internal/application/config/{decode,limits,store}.go` и native tests; `internal/application/module/{invoke,artifacts}.go` и native tests |
-| Adapters/composition | `internal/presentation/admin/modules.go`, `internal/presentation/peerplugin/handler.go`, `cmd/runtime/main.go`, `internal/infrastructure/{artifacts,wasm}/`, package comments/domain native tests |
-| Contracts | `contracts/{abi,actions,codes,invoke,documents,definitions_test}.go`, `contracts/schema/{admin,invoke,module,settings}.go`, весь generated `contracts/v1/`, `cmd/contracts/main.go` |
-| E2E | Typed `tests/*.ts`; обновлённые `tests/fixtures/{module-artifact-action,peer-invoke,runtime-generation,runtime-lifecycle,runtime-restart-reconnect,sandbox-adversarial,wasm-memory-limit,wasm-probe}/main.go` |
-| Quality | `.golangci.yml`, `eslint.config.mjs`, `tsconfig.json`, `Makefile`, `.github/workflows/check.yml`, `package{,-lock}.json`, `.gitignore` |
-| Docs/instructions | `AGENTS.md`, `README.md`, `TODO.md`, `docs/site/plugins/runtime.md`, `docs/blockers-runtime-v2.md` |
+## P2 — quality, integration and release gates
 
-Удалены старые application flat paths, restplugin path, contracts/assets.go
-и переименованный contracts/module_actions.go. Unit wrappers
-`tests/{artifact,configuration,configuration-store}.test.ts` и probes
-`tests/fixtures/{artifact-probe,config-probe,configuration-store-probe}` заменены
-native coverage; `tests/unit/definitions_test.go` разделён по владельцам.
-Их функциональность сохранена в новых исходниках/tests; пустых пакетов нет.
+- [ ] Complete Go-native acceptance for config validation, catalog/routing,
+  atomic activation, host authorization, per-call instance isolation and
+  bounded concurrency; keep TypeScript for public contracts and real
+  child-process E2E. Regression tests now prove invocation does not copy
+  unrelated artifacts and admission is capped at four concurrent invocations;
+  a race-tested Go case now drives four actual concurrent `Invoke` calls,
+  verifies the fifth is overloaded, fences new calls during drain, and proves
+  drain waits for admitted calls. A WASM unit test also executes a mutable-
+  global counter twice through the same Executor and proves each fresh instance
+  starts from its initial state. Remaining adversarial and config-generation
+  concurrency cases are still open.
+- [x] Add Go-native tests for multi-module settings/generation, per-command host
+  authorization and the actual versioned WASM host import. The full cross-plugin
+  and isolation acceptance set remains open below.
+- [x] Add real Core→SDK→Runtime→Domain process E2E for Core exact-generation
+  config, directory eligibility, allowlisted WASM host calls, Runtime identity,
+  Domain grant deny/allow, Runtime entity/method narrowing and Core link deletion.
+- [x] Add mock-plugin conformance coverage at the host ABI and invoker boundaries:
+  the WASM host import preserves a non-Domain plugin/method/payload, and the
+  invoker routes a configured non-Domain call only through its command allowlist.
+- [x] Exercise lease-renewal refusal in the Runtime child process against an
+  mTLS Core lifecycle fixture using the contract's real 10-second renewal
+  cadence. Runtime exits fail-closed and explicitly deregisters its incarnation.
+- [x] Cancel an admitted Runtime peer-caller operation over an actual mTLS
+  `pluginprotocol` session to a mock plugin; assert cancellation reaches the
+  remote handler and the call count remains one.
+- [x] Add a child-process cancellation acceptance for an in-flight Runtime→
+  plugin host call. The real Runtime executable is configured from a Core-
+  format mTLS peer directory, calls a mock metrics plugin over authenticated
+  `pluginprotocol`, then receives cancellation from the invoking caller; the
+  remote handler observes cancellation and its delivery count remains one.
+  Generation rejection/recovery and real Core restart/reconnect are also
+  covered cross-repository. Artifact upload uses the SDK streaming action in
+  process-level lifecycle tests; aggregate generation bytes are capped and
+  covered at config validation.
+- [ ] Verify artifact handling and Runtime host calls across supported OS/carrier
+  combinations with hosted Linux/macOS CI. Do not claim hosted status from local
+  runs.
+- [x] Repeat the race-instrumented Core→SDK→Domain→Runtime acceptance and
+  diagnose the prior transient host-call refusal. Runtime now emits a bounded,
+  closed `stage` diagnostic without peer addresses, identities, payloads or raw
+  transport errors. The failure was `no_ready_peer`: Core's eligible directory
+  lease lagged plugin-local readiness. The Core fixture now waits for published
+  route eligibility, builds its race-instrumented peer client once, and keeps
+  the finite drain loop inside the ABI deadline. Two consecutive complete
+  `GOFLAGS=-race` process runs passed; additional platform and lease-failure
+  qualification stays open.
+- [x] Remove stale single-module product contracts, scope ACL, delegated-scope/
+  OwnerGroup code, fixtures and contradictory architecture text. Keep protocol
+  and Admin Surface versions that belong to their separate contracts.
+- [ ] Remove any further duplicate/unused wrappers only with consumer and
+  coverage evidence. Regenerate contracts and pass independent lint,
+  typecheck, tests, race, vet, build and doc gates. Production-ready requires
+  no open P0/P1 blockers.
 
-OPEN: hosted CI/required branch checks не запускались; реальные Core Management/
-reconciliation, release-compatible SDK, Domain delegated-scope/host ABI и
-полная межрепозиторная sandbox acceptance не закрываются этим cleanup.
-Другие репозитории не редактировались; commits/push/releases не выполнялись.
+## Latest verification evidence
 
-Проверка graceful peer drain — 2026-10-08 (macOS): целевой child-process
-сценарий `tests/peer-invoke.test.ts` прошёл (14 тестов), полный suite после
-изменения — 13 файлов / 62 теста; `GOWORK=off go test ./...`, `go build ./...`,
-`go vet ./...` и `git diff --check` прошли. Это локальная Runtime-проверка,
-не hosted CI и не Core/SDK rollout conformance.
+Independent `GOWORK=off` Go tests/vet/build and full `make check-race` passed
+against published SDK/protocol tags without replacements. `make check` also
+passed generated-contract verification, Go lint, TypeScript lint/typecheck,
+42 Vitest tests, Go tests, vet and build. The aggregated VitePress build passed.
+Hosted Linux/macOS and the remaining Core→SDK→Runtime→Domain lifecycle,
+artifact and negative-authorization cases remain open.
 
-Linux ARM64-проверка — 2026-10-08 (OrbStack): `npx vitest run tests
---maxWorkers=1` прошёл (13 файлов / 59 тестов), `go build ./...` и `go vet
-./...` прошли на Go 1.26.8. Для первого adversarial fixture увеличен timeout
-с Vitest default 5 s до 30 s: холодная компиляция дочернего Go fixture на
-эмулируемой Linux ARM64-среде занимала около 7 s. Это платформенный локальный
-gate, не hosted CI и не сквозная Core→SDK→Runtime приёмка.
+An earlier Runtime `make check` and `make check-race` passed with the four-call
+admission cap, command-scoped immutable generation view and aggregate 128 MiB
+artifact ceiling. At that checkpoint, 43 Vitest tests passed. Regression tests confirm an
+invocation does not copy an unrelated 16 MiB artifact, the fifth concurrent
+call is rejected as retryable `overloaded`, and an over-limit generation
+preserves the previous active configuration. A test-first cancellation regression
+also confirms that a candidate cancelled during module validation is not
+activated and leaves the previous generation intact. Command routing now passes
+the configured `moduleId + export` through the Invoker and WASM executor; Core
+configuration application rejects missing or ABI-incompatible exports before
+activation. Removed the unused default-export/no-host Executor wrappers;
+fixtures now invoke the explicit export/capability API. The latest aggregate
+VitePress attempt remains blocked by four dead links in out-of-scope Studio.
+The current aggregate documentation build is blocked by four dead links in the
+out-of-scope Studio owner sources (`studio/index.md` and
+`studio/technical-architecture.md`).
 
-Повторная локальная проверка текущего WIP — 2026-10-07: полный Vitest suite
-прошёл (13 файлов / 59 тестов, включая `tests/sandbox-adversarial.test.ts`,
-`tests/runtime-restart-reconnect.test.ts` и `tests/peer-invoke.test.ts`),
-`go test ./...`, `go build ./...`, `go vet ./...` (в режиме workspace и с
-`GOWORK=off`) и `git diff --check` также прошли. Сквозной
-Core→SDK→Runtime→Server и полная sandbox/Domain conformance остаются открытыми;
-этот результат их не закрывает.
+The current real Core→SDK→Domain→Runtime child-process scenario now submits a
+Runtime settings generation whose command references a missing catalog module.
+Core reports `activation_failed`; Runtime readiness exposes the still-applied
+generation with the rejected generation pending; a later valid Core generation
+restores readiness and the previous command route. The full integration test
+passed on Darwin through the bundled Node runtime. Coordinating drain with a
+real Core, hosted OS CI and the remaining resource/security gates are still
+open. A separate Runtime child-process test confirms successful completion of
+an admitted finite call during local graceful shutdown, fencing of new calls,
+and process exit after completion.
 
-Начальные локальные срезы сохранены как прототип. Все незакрытые пункты ниже
-относятся к общему релизу Liapoldus v2 и не входят в приёмку v1. Версия
-`contracts/v1` обозначает первую версию контракта самого плагина, а не этап
-экосистемы.
+The latest Core `serve-domain` child-process acceptance now restarts both
+Domain and Runtime under fresh Core incarnations. It confirms Core restores the
+Domain model and Runtime exact configuration generation, Domain volatile data
+is lost only on Domain restart, Core republishes the Domain peer route, and
+Runtime host calls resume after both process restarts; after graceful Runtime
+shutdown, Core reports the desired instance as not-ready. It now also observes
+a Domain write made by an admitted in-flight Runtime host call, SIGTERMs Runtime,
+verifies new calls are fenced while that call completes, and checks the
+subsequent Core deregistration. This coordinated drain acceptance passed on
+Darwin through the local multi-repository workspace. Hosted OS, invalid-
+candidate ACK against real Core, and end-to-end resource ceilings remain open.
 
-Milestone платформы перед production integration: Runtime пока закреплён на
-Plugin SDK `v1.0.0`, тогда как Core уже перешёл на опубликованный `v1.1.0` с
-self-registration/lease, peer directory и compatibility metadata. Независимая
-Runtime сборка проходит на текущем pin, но production lifecycle integration
-должна перейти на совместимую опубликованную immutable revision и пройти
-сквозной Core→SDK→Runtime process gate; workspace-only dependency не является
-release evidence. Также обязательны совместимость WASM ABI/artifact/settings/
-peer contracts и production cohort gate. Отдельные Runtime-группы масштабирует
-оператор; Core не запускает replicas и не интерпретирует WASM. Canary допускается
-только при совместимых когортах и подтверждённом traffic weight; неизвестный
-результат `runtime.invoke` не replay-ится.
+The coordinated-drain change was verified with the real multi-repository
+Core→SDK→Runtime→Domain integration on Darwin. Runtime `make check` and
+`make check-race` pass, including tests for closed peer-call failure stages and a
+Go test that compiles and executes a host-importing WASM module which returns
+its host response after a bounded guest loop. The fixture exposed and corrected
+the local-index encoding for WASM parameters versus declared locals. Two
+consecutive full Core→SDK→Domain→Runtime process runs with `GOFLAGS=-race` pass
+after waiting for Core directory eligibility before the write and using a
+prebuilt peer client for bounded polling.
 
-- [ ] Gate платформы: lease expiry, новая incarnation, совместимость WASM ABI
-  при rolling/canary, drain длинного вызова и отказ при несовместимом artifact.
-  - [x] Runtime-owned shutdown slice: на SIGINT/SIGTERM fence новые peer-вызовы,
-    сообщить `ready=false`, закрыть приём сессий и дождаться уже допущенных
-    `runtime.invoke` в пределах `pluginShutdownGraceSeconds`. Child-process
-    conformance доказывает, что новый вызов получает `503 not_ready`, а принятый
-    bounded WASM-вызов завершается до выхода процесса:
-    `tests/peer-invoke.test.ts`. Это не закрывает lease/incarnation/cohort gates.
+The generic host-call path now has a paired non-Domain conformance regression:
+the actual WASM host import preserves a `metrics.aggregate` call, and the
+Invoker forwards a non-Domain target only when that exact plugin/method pair is
+present in the active command allowlist. Targeted Go and race tests pass. A new
+Runtime lifecycle process scenario also makes the mTLS Core fixture refuse the
+next lease renewal; Runtime exits fail-closed and deregisters its incarnation.
+At that checkpoint, the Runtime test suite passed (43 Vitest tests), along with the complete
+Runtime `make check` using bundled Node: generated contracts, golangci-lint
+(0 issues), ESLint, typecheck, Go tests, vet and build. Hosted supported-OS
+runs and outstanding production resource gates remain open.
 
-- [x] Начальная строгая settings-схема и тестируемая проверка group/command/scope.
-- [x] Product Manifest содержит единственный peer capability `runtime.invoke`; request/response/error schemas генерируются в `contracts/v1/`. Server HTTP adapter относится к v3; self-registration/lease остаются отдельным milestone.
-- [x] Подключить строгий `config.DecodeConfiguration` к Plugin SDK REST Reload: процесс Runtime получает точные bytes указанного поколения по mTLS, проверяет SHA-256 именно этих bytes и соответствие schema version, валидирует документ до применения и одним in-memory pointer swap делает настройки активными. Некорректный или повреждённый candidate получает `applyRejected`; активный snapshot сохраняется. Сквозные проверки: `tests/runtime-lifecycle.test.ts`, `internal/application/config/store_test.go`.
-- [x] Расширить Reload preflight до пары settings+WASM: до ACK открыть content-addressed artifact по `module.sha256`, ограниченно прочитать его, повторно сверить digest и ABI без исполнения start function, затем одной атомарной публикацией заменить in-memory settings+module snapshot. Неизменяемый artifact остаётся на persistent filesystem; после рестарта SDK lifecycle должен получить новый `Reload` и повторно pull-ить точную конфигурацию у Core. Child-process fixture доказывает missing/tampered/mismatched artifact rejection без изменения active pair и полную замену согласованной пары: `tests/runtime-generation.test.ts`.
-- [x] Runtime restart/reconnect slice: Core-side Plugin SDK client против двух
-  дочерних Runtime replicas с общим artifact-dir и fake Core, выключаемым на 503.
-  Пока Core недоступен, exact-generation `Reload` чисто отклоняется
-  (pending, ready=false) без падения процесса; после возврата Core та же пара
-  поколение+digest применяется повторно без нового upload — каталог восстановлен
-  из persistent filesystem. Evidence: `tests/runtime-restart-reconnect.test.ts`.
-  Повторное объявление того же поколения идемпотентно
-  (`alreadyActive`), следующее поколение применяется штатно. Это runtime-side
-  срез; полный Core restart/reconciliation gate обеих сторон остаётся пунктом
-  ниже.
-- [ ] Закрыть сквозной Core serve → Plugin SDK → Runtime child-process lifecycle
-  на рестартах обеих сторон. Core local WIP уже содержит replica registration,
-  Reload fan-out и exact-generation reconciliation; непокрытый gate — реальный
-  штатный startup/listener ordering, reconnect и восстановление operation до
-  ACK без повторного исполнения product invoke.
-- [x] Подключить Runtime Admin Surface к generic Plugin SDK `ArtifactAcceptor`: bounded multipart callback передаёт WASM в content-addressed store, который публикует только ABI-валидный модуль с совпавшим digest. Добавлены plugin-owned action/metadata/receipt contracts и каталог проверенных digest: `tests/module-artifact.test.ts`.
-- [x] Проверить SDK→Runtime artifact transport на настоящем дочернем Runtime-процессе и mTLS: `PluginClient.ArtifactStream` загружает два модуля через multipart, получает receipts, `AdminAction` читает проверенный каталог, затем Reload активирует exact generations с этими digest. Evidence: `tests/runtime-lifecycle.test.ts`.
-- [ ] Добавить Core Management API → Core `SDKAdminControl` → Runtime child-process E2E: доказать авторизацию Admin Surface, streaming без полной буферизации, Core request/artifact limits, cancellation и сохранение product-owned response. Текущий process fixture вызывает Plugin SDK Core-side client напрямую и не покрывает Core HTTP forwarding.
-- [x] Изолированный вызов WASM через versioned JSON ABI с bounds из typed ABI definition; без WASI/host imports. `tests/wasm-execution.test.ts` дополнительно подтверждает, что trap в `alloc` или `invoke` возвращает `execution_failed`, отмена/deadline остаются отдельными исходами, а неверная арность результата — `invalid_abi`. Это локальный execution slice, не полная sandbox-приёмка.
-- [x] Adversarial-проверка memory cap: fixture пытается `memory.grow` на 1024 pages сверх начальной страницы при contract ceiling 1024 и обращается за пределами оставшейся памяти. Вызов получает bounded `execution_failed`, generation/settings/module active snapshot остаётся неизменным. Код ошибки закреплён в `contracts/v1/wasm-errors.json`; проверка: `tests/wasm-memory-limit.test.ts`. Это не закрывает полную sandbox-приёмку.
-- [x] Artifact admission проверяет WASM ABI до content-addressed publication: обязательные exports и signatures определены в `contracts/abi.go`, модули с import-ами отклоняются без запуска start-функции. Evidence: `internal/infrastructure/artifacts/store_test.go` покрывает отсутствие ABI exports, несовпадающую signature, host function import и положительную ABI-совместимую публикацию.
-- [x] Sandbox adversarial conformance child-process: генератор hostile WASM (import-env/import-wasi, bogus длина/указатель, non-json return, infinite loop, alloc range, recursion) прогоняется через реальный `wasm-probe` и дочерний Runtime. Проверены все отказы: `invalid_abi`, `payload_too_large`, `invalid_json`, `execution_timeout` (deadline 5s), `execution_failed`, при этом executor/processor изменения не потребовались; граница входных данных в 1 MiB добита модулем с 16-page memory. Evidence: `tests/sandbox-adversarial.test.ts` (11 тестов). Это не закрывает полную sandbox-приёмку (host-функции/Domain остаются пунктом ниже).
-- [ ] Host-вызовы Domain заблокированы текущим межплагинным product contract;
-  не добавлять Runtime-local scope payload или второй API. Domain `ProductCaller`
-  сопоставляет mTLS URI SAN ровно с одним фиксированным `Tenant/Site/Group`,
-  тогда как Runtime command разрешает несколько `tenantSites`, а каждый
-  `runtime.invoke` выбирает scope из входного запроса. Domain product request
-  schemas не принимают tenant/site/group/delegation claim; передать выбранный
-  Runtime scope в Domain и получить Domain-проверку tenant/site + OwnerGroup
-  без изменения Domain-контракта сейчас нельзя. Дополнительно текущий WASM ABI
-  запрещает все imported host functions. Возобновить slice после Domain-owned
-  версии контракта, которая задаёт аутентифицированное per-call delegated scope
-  для Runtime identity с проверкой entity OwnerGroup, и после согласования
-  versioned Runtime WASM host-import ABI. До этого сохранить Runtime peer
-  command/scope/entity ACL как отдельную границу, но не считать её Domain
-  авторизацией.
-- [x] Базовый bounded WASM deadline/cancellation: ABI deadline применяется к
-  compile/instantiate/start/alloc/invoke, отмена до запуска и прерывание
-  зависшей start function проверены настоящим Go fixture в
-  `tests/wasm-execution.test.ts`; прерывание долгого peer-вызова проверено
-  отдельным дочерним Runtime в `tests/peer-invoke.test.ts`. Эти проверки не
-  закрывают будущую host-import приёмку.
-- [ ] После согласования и реализации Domain host-import ABI расширить sandbox
-  adversarial suite на cancellation/deadline каждого разрешённого host call,
-  проверку tenant/site delegation и невозможность выхода из настроенных
-  command/entity scopes. До этого не объявлять Runtime↔Domain интеграцию
-  готовой.
-- [x] Product-owned peer `runtime.invoke`: `internal/presentation/peerplugin`
-  регистрирует единственный unary call-method через pluginprotocol, строго
-  декодирует Server v1 request-envelope или голый invoke-request, проверяет
-  caller identity через `callerAuthorizer` (AuthorizeStream закрыт), проводит
-  масштабирование в `internal/application`. Command/scope/entity ACL, bounds
-  compose, readiness fencing (not_ready до первого применённого поколения),
-  bounded-execution cancellation/timeout и versioned error-контракт
-  (`contracts/v1/errors-invoke.json`, `contracts/invoke.go`) покрыты сквозными
-  peer-сценариями: `tests/peer-invoke.test.ts`; HTTP terminal adapter и
-  routing остаются в зоне Server.
-- [x] Scope/entity ACL на `runtime.invoke`: запрещённая tenant/site → 403
-  `forbidden_scope`, entity вне allowlist команды → 403 `forbidden_entity`;
-  подтверждено в `tests/peer-invoke.test.ts`. Host-вызовы Domain с fencing
-  остаются открытым пунктом ниже.
-- [ ] Domain host access с tenant/site fencing и command/entity ACL остаётся
-  заблокирован внешним контрактом, описанным выше; не считать текущие
-  `runtime.invoke` ACL эквивалентом Domain-проверки.
-- [ ] Независимое масштабирование групп, digest parity и readiness fencing.
-- [ ] Сквозная HTTP-маршрутизация Server → Runtime `runtime.invoke` не входит в
-  v2, поскольку потребовала бы изменений Server plugin. Перенесена в v3; в v2
-  проверять только Runtime-owned peer/WASM путь и общие Core lifecycle gates.
-- [x] Базовый ручной запуск через CLI flags, Plugin SDK REST Reload/readiness, exact-generation config pull и mTLS. Это не включает self-registration/lease, replica discovery или rollout coordination.
-- [ ] Сквозные E2E (Core→SDK→Runtime→Server) и hosted Linux CI; не объявлять плагин готовым до их прохождения. Sandbox adversarial suite прошёл на macOS и Linux ARM64 (`tests/sandbox-adversarial.test.ts`, 11 тестов); реальный Core restart/reconciliation gate остаётся открытым. Server HTTP route относится к v3.
+Peer-caller cancellation now has a race-tested regression: cancellation reaches
+the in-flight plugin session and the side-effecting call is not retried. The
+Runtime lifecycle child-process scenario passes under `GOFLAGS=-race` while the
+mTLS Core fixture refuses renewal, observes fail-closed process exit and
+deregistration, and preserves the active-generation lifecycle assertions.
+An additional real mTLS `pluginprotocol` test cancels the caller while a mock
+plugin handler is running, confirms the remote handler observes cancellation,
+and confirms one delivery. The full Runtime `make check` passes again on this
+tree after those regressions. Cancellation through a full Runtime child process
+was not covered by those earlier tests; the child-process gate is now closed as
+recorded above.
+
+That process-level gate is now closed locally: `tests/peer-invoke.test.ts`
+drives the Runtime child through a Core-format mTLS directory response and a
+real authenticated `pluginprotocol` mock handler. Cancelling the inbound
+`runtime.invoke` cancels the remote handler and leaves its delivery count at
+one. The focused child-process test passes (12 cases), and the fixture also
+passes under `GOFLAGS=-race`. This is mock-Core/local acceptance, not hosted OS
+qualification or the real-Core Domain grant scenario.
+
+The generated Runtime settings schema previously constrained every configured
+host-call method to `domain.*`, despite Go validation and the host ABI supporting
+generic plugin methods. A code-owned schema regression reproduced the mismatch;
+the schema now accepts bounded `plugin.method` identifiers for any plugin and
+the generated v2 artifact is synchronized. Full Runtime `make check` passes
+after the fix (generated-contract check, golangci-lint, ESLint, typecheck, 43
+Vitest tests at that checkpoint, Go tests, vet and build). Hosted OS qualification remains open.
+
+Latest verification after adding Runtime child-process host-call cancellation:
+`make check` passes with 44 Vitest tests, generated-contract parity, zero
+golangci-lint issues, ESLint, typecheck, Go tests, vet and build. The focused
+12-case child-process test passes in normal mode and its fixture passes under
+`GOFLAGS=-race`; full `make check-race` also passes with 44 tests. Race mode
+exposed that a shutdown test inferred admission from CPU-loop duration. Replace
+that timing assumption with a deterministic barrier: the Runtime fixture holds
+an actual authenticated mTLS `pluginprotocol` host call at a mock handler,
+signals shutdown only after the call is admitted, verifies new calls are
+refused, then releases the admitted call and verifies graceful completion. The
+fixture no longer contains the unused finite CPU-loop generator. `make check`
+and full `make check-race` pass with this barrier. This closes local mock-Core
+drain acceptance only; hosted OS/CI, real-Core grant/link behavior under
+cancellation, and remaining Domain resource qualification remain open.
+
+Linux ARM64 container verification also passes for race-enabled
+`peercaller`/Invoker/WASM package tests and the race-instrumented Runtime
+child-process lease-refusal lifecycle scenario. This is local container evidence,
+not hosted CI or cross-OS qualification.
+
+## Explicit non-goals
+
+- No direct WASM network/filesystem/WASI access, arbitrary target/method
+  selection, streaming host calls, distributed transactions or automatic replay.
+- No tenant/site/group or Domain delegation payload; Domain authorization uses
+  authenticated Runtime mTLS identity plus Core entity/operation grants.
+- No public Server HTTP route in v2. Operator controls process count and
+  deployment; Core does not install or supervise Runtime workloads.

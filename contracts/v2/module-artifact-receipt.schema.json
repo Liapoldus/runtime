@@ -1,5 +1,5 @@
 {
-  "$id": "https://liapoldus.github.io/plugins/runtime/v1/module-artifact-receipt.schema.json",
+  "$id": "https://liapoldus.github.io/plugins/runtime/v2/module-artifact-receipt.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
@@ -11,6 +11,6 @@
   "required": [
     "sha256"
   ],
-  "title": "Runtime module upload receipt v1",
+  "title": "Runtime module upload receipt v2",
   "type": "object"
 }

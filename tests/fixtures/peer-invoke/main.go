@@ -26,28 +26,37 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
-	sdkmodels "github.com/Liapoldus/plugin-sdk/domain/models"
-	"github.com/Liapoldus/plugin-sdk/infrastructure"
-	protocolpeer "github.com/Liapoldus/pluginprotocol/v2/presentation/peer"
+	sdkmodels "github.com/Liapoldus/plugin-sdk/v2/domain/models"
+	"github.com/Liapoldus/plugin-sdk/v2/infrastructure"
+	protocolpeer "github.com/Liapoldus/pluginprotocol/v3/presentation/peer"
 	"github.com/Liapoldus/runtime/contracts"
 	"github.com/Liapoldus/runtime/internal/infrastructure/artifacts"
+	"github.com/Liapoldus/runtime/tests/fixtures/lifecyclecore"
 )
 
 var errScenario = errors.New("runtime invoke integration scenario failed")
 
 const (
-	instanceID     = "runtime-invoke-e2e"
-	replicaID      = "runtime-invoke-e2e-1"
-	coreCN         = "runtime-invoke-core"
-	runtimeCN      = "runtime-invoke-plugin"
-	callerCN       = "runtime-invoke-caller"
-	outsiderCN     = "runtime-invoke-outsider"
-	runtimePeerURI = "spiffe://liapoldus.test/runtime"
-	callerPeerURI  = "spiffe://liapoldus.test/server"
-	outsiderURI    = "spiffe://liapoldus.test/outsider"
-	schemaV1       = "1"
+	instanceID           = "runtime-invoke-e2e"
+	replicaID            = "runtime-invoke-e2e-1"
+	coreCN               = "runtime-invoke-core"
+	runtimeCN            = "runtime-invoke-plugin"
+	callerCN             = "runtime-invoke-caller"
+	outsiderCN           = "runtime-invoke-outsider"
+	runtimePeerURI       = "spiffe://liapoldus/plugin/runtime-invoke-e2e/runtime-invoke-e2e-1/inc-runtime"
+	placementID          = "node-runtime"
+	incarnationID        = "inc-runtime"
+	callerPeerURI        = "spiffe://liapoldus.test/server"
+	outsiderURI          = "spiffe://liapoldus.test/outsider"
+	metricsInstanceID    = "metrics-main"
+	metricsReplicaID     = "metrics-main-1"
+	metricsIncarnationID = "inc-metrics"
+	metricsPlacementID   = "node-metrics"
+	metricsPeerURI       = "spiffe://liapoldus/plugin/metrics-main/metrics-main-1/inc-metrics"
+	schemaVersion        = "2"
 )
 
 type storedGeneration struct {
@@ -56,8 +65,11 @@ type storedGeneration struct {
 }
 
 type scenario struct {
-	contract    infrastructure.HTTPContract
-	generations map[string]storedGeneration
+	contract          infrastructure.HTTPContract
+	directoryContract infrastructure.PeerDirectoryPollContract
+	runtimeIdentity   sdkmodels.PeerReplicaID
+	metricsAddress    string
+	generations       map[string]storedGeneration
 }
 
 // echoWasm returns the pointer it was handed so the host reads back the exact
@@ -79,6 +91,82 @@ const startLoopWasm = "0061736d01000000" +
 	"080102" +
 	"0a1b03040041000b0c002001ad4220862000ad840b070003400c000b0b"
 
+// hostCallWasm makes one real versioned Runtime host call. The host-call JSON
+// lives in the guest memory data segment so cancellation is exercised across
+// the child process, Core directory poll, mTLS protocol session and handler.
+func hostCallWasm(payload []byte) []byte {
+	uleb := func(value int) []byte {
+		encoded := make([]byte, 0, 5)
+		for value >= 0x80 {
+			encoded = append(encoded, byte(value&0x7f)|0x80)
+			value >>= 7
+		}
+		return append(encoded, byte(value&0x7f))
+	}
+	name := func(value string) []byte {
+		encoded := append([]byte(nil), uleb(len(value))...)
+		return append(encoded, value...)
+	}
+	section := func(module []byte, id byte, body []byte) []byte {
+		module = append(module, id)
+		module = append(module, uleb(len(body))...)
+		return append(module, body...)
+	}
+	vector := func(body, item []byte) []byte {
+		body = append(body, uleb(len(item))...)
+		return append(body, item...)
+	}
+	i32const := func(body []byte, value int64) []byte {
+		body = append(body, 0x41)
+		remaining := value
+		for {
+			current := byte(remaining & 0x7f)
+			remaining >>= 7
+			more := true
+			if remaining == 0 && current&0x40 == 0 || remaining == -1 && current&0x40 != 0 {
+				more = false
+			}
+			if more {
+				current |= 0x80
+			}
+			body = append(body, current)
+			if !more {
+				return body
+			}
+		}
+	}
+
+	module := []byte{0, 'a', 's', 'm', 1, 0, 0, 0}
+	module = section(module, 1, []byte{2, 0x60, 1, 0x7f, 1, 0x7f, 0x60, 2, 0x7f, 0x7f, 1, 0x7e})
+	imports := []byte{1}
+	imports = append(imports, name("liapoldus.plugin.v2")...)
+	imports = append(imports, name("call")...)
+	imports = append(imports, 0, 1)
+	module = section(module, 2, imports)
+	module = section(module, 3, []byte{2, 0, 1})
+	module = section(module, 5, []byte{1, 0, 1})
+	exports := []byte{3}
+	exports = append(exports, name("memory")...)
+	exports = append(exports, 2, 0)
+	exports = append(exports, name("alloc")...)
+	exports = append(exports, 0, 1)
+	exports = append(exports, name("invoke")...)
+	exports = append(exports, 0, 2)
+	module = section(module, 7, exports)
+	allocate := i32const([]byte{0}, 4096)
+	allocate = append(allocate, 0x0b)
+	invoke := i32const([]byte{0}, 0)
+	invoke = i32const(invoke, int64(len(payload)))
+	invoke = append(invoke, 0x10, 0, 0x0b)
+	codes := []byte{2}
+	codes = vector(codes, allocate)
+	codes = vector(codes, invoke)
+	module = section(module, 10, codes)
+	data := []byte{1, 0, 0x41, 0, 0x0b}
+	data = vector(data, payload)
+	return section(module, 11, data)
+}
+
 type outcome struct {
 	Status     int             `json:"status,omitempty"`
 	Body       json.RawMessage `json:"body,omitempty"`
@@ -93,10 +181,7 @@ type outcome struct {
 type result struct {
 	NotReady          outcome `json:"notReady"`
 	Success           outcome `json:"success"`
-	SuccessWithEntity outcome `json:"successWithEntity"`
 	UnknownCommand    outcome `json:"unknownCommand"`
-	ForbiddenScope    outcome `json:"forbiddenScope"`
-	ForbiddenEntity   outcome `json:"forbiddenEntity"`
 	InvalidRequest    outcome `json:"invalidRequest"`
 	PayloadTooLarge   outcome `json:"payloadTooLarge"`
 	UnknownMethod     outcome `json:"unknownMethod"`
@@ -104,7 +189,12 @@ type result struct {
 	Cancelled         outcome `json:"cancelled"`
 	Timeout           outcome `json:"timeout"`
 	Envelope          outcome `json:"envelope"`
-	ShutdownDrain     struct {
+	HostCallCancelled struct {
+		Call                        outcome `json:"call"`
+		RemoteHandlerObservedCancel bool    `json:"remoteHandlerObservedCancel"`
+		DeliveryCount               int64   `json:"deliveryCount"`
+	} `json:"hostCallCancelled"`
+	ShutdownDrain struct {
 		AcceptedCall           outcome `json:"acceptedCall"`
 		RefusedAfterDrain      outcome `json:"refusedAfterDrain"`
 		ProcessExitedAfterCall bool    `json:"processExitedAfterCall"`
@@ -118,7 +208,7 @@ type harness struct {
 
 func main() {
 	if err := run(); err != nil {
-		if _, err := fmt.Fprintln(os.Stderr, "Runtime invoke integration failed"); err != nil {
+		if _, err := fmt.Fprintf(os.Stderr, "Runtime invoke integration failed: %v\n", err); err != nil {
 			os.Exit(1)
 		}
 		os.Exit(1)
@@ -148,15 +238,32 @@ func run() error {
 	if err != nil {
 		return errScenario
 	}
+	hostPayload, err := json.Marshal(map[string]any{
+		"plugin": metricsInstanceID, "method": "metrics.aggregate", "payload": map[string]string{"window": "daily"},
+	})
+	if err != nil {
+		return errScenario
+	}
+	drainHostPayload, err := json.Marshal(map[string]any{
+		"plugin": metricsInstanceID, "method": "metrics.aggregate", "payload": map[string]string{"window": "drain"},
+	})
+	if err != nil {
+		return errScenario
+	}
+	hostModule := hostCallWasm(hostPayload)
+	drainHostModule := hostCallWasm(drainHostPayload)
 	echoDigest, slowDigest := sdkmodels.Digest(echo), sdkmodels.Digest(slow)
+	hostDigest, drainHostDigest := sdkmodels.Digest(hostModule), sdkmodels.Digest(drainHostModule)
 	metadata, err := contracts.PluginDocuments()
 	if err != nil {
 		return errScenario
 	}
 	adminActions := contracts.ModuleAdminActionDefinitions()
 	core := &scenario{contract: contract, generations: map[string]storedGeneration{
-		"runtime-invoke-slow": publish(configurationDocument("runtimeinvokegroup", slowDigest, "spin")),
-		"runtime-invoke-echo": publish(configurationDocument("runtimeinvokegroup", echoDigest, "echo")),
+		"runtime-invoke-slow":  publish(configurationDocument("runtimeinvokegroup", slowDigest, "spin")),
+		"runtime-invoke-drain": publish(drainHostConfigurationDocument(drainHostDigest)),
+		"runtime-invoke-echo":  publish(configurationDocument("runtimeinvokegroup", echoDigest, "echo")),
+		"runtime-invoke-host":  publish(hostCallConfigurationDocument(hostDigest)),
 	}}
 	listener, err := new(net.ListenConfig).Listen(context.Background(), "tcp", "127.0.0.1:0")
 	if err != nil {
@@ -171,13 +278,93 @@ func run() error {
 	if !roots.AppendCertsFromPEM(ca) {
 		return errScenario
 	}
+	metricsCertificate, err := tls.LoadX509KeyPair(credentials.metricsPeerCert, credentials.metricsPeerKey)
+	if err != nil {
+		return errScenario
+	}
+	remoteStarted := make(chan struct{}, 1)
+	remoteCancelled := make(chan struct{}, 1)
+	drainCallStarted := make(chan struct{}, 1)
+	drainCallRelease := make(chan struct{})
+	var remoteDeliveries atomic.Int64
+	remoteHandler, err := protocolpeer.NewRegistry().RegisterCall("metrics.aggregate", func(ctx context.Context, call protocolpeer.Call) (protocolpeer.Result, error) {
+		remoteDeliveries.Add(1)
+		var request struct {
+			Window string `json:"window"`
+		}
+		if json.Unmarshal(call.Payload, &request) == nil && request.Window == "drain" {
+			drainCallStarted <- struct{}{}
+			select {
+			case <-drainCallRelease:
+				return protocolpeer.Result{Payload: []byte(`{"ok":true}`)}, nil
+			case <-ctx.Done():
+				return protocolpeer.Result{}, ctx.Err()
+			}
+		}
+		remoteStarted <- struct{}{}
+		<-ctx.Done()
+		remoteCancelled <- struct{}{}
+		return protocolpeer.Result{}, ctx.Err()
+	}).Build()
+	if err != nil {
+		return errScenario
+	}
+	metricsServer, err := protocolpeer.Listen(protocolpeer.ServerConfig{
+		Network:  protocolpeer.NetworkConfig{Carrier: protocolpeer.CarrierTCP, Endpoint: "127.0.0.1:0"},
+		Security: protocolpeer.SecurityConfig{Identity: metricsPeerURI, Certificate: metricsCertificate, Roots: roots},
+		Handler:  remoteHandler,
+	})
+	if err != nil {
+		return errScenario
+	}
+	metricsContext, stopMetrics := context.WithCancel(context.Background())
+	metricsDone := make(chan error, 1)
+	go func() { metricsDone <- metricsServer.Sessions(metricsContext) }()
+	defer func() {
+		stopMetrics()
+		checkCleanup(metricsServer.Close())
+		<-metricsDone
+	}()
+	runtimePeerCertificate, err := tls.LoadX509KeyPair(credentials.runtimePeerCert, credentials.runtimePeerKey)
+	if err != nil {
+		return errScenario
+	}
+	probeHandler, err := protocolpeer.NewRegistry().Build()
+	if err != nil {
+		return errScenario
+	}
+	probe, err := protocolpeer.Dial(context.Background(), protocolpeer.ClientConfig{
+		Network:  protocolpeer.NetworkConfig{Carrier: protocolpeer.CarrierTCP, Endpoint: metricsServer.Addr()},
+		Security: protocolpeer.SecurityConfig{Identity: runtimePeerURI, Certificate: runtimePeerCertificate, Roots: roots, PeerIdentity: metricsPeerURI},
+		Handler:  probeHandler, Limits: protocolpeer.DefaultLimits(),
+	})
+	if err != nil {
+		return fmt.Errorf("mock plugin mTLS probe failed: %w", err)
+	}
+	if err := probe.Close(); err != nil {
+		return errScenario
+	}
+	runtimeIdentity := sdkmodels.PeerReplicaID{
+		InstanceID: instanceID, ReplicaID: replicaID, IncarnationID: incarnationID, PlacementID: placementID,
+	}
+	directoryContract, err := infrastructure.LoadPeerDirectoryPollContract()
+	if err != nil {
+		return errScenario
+	}
+	core.runtimeIdentity = runtimeIdentity
+	core.directoryContract = directoryContract
+	core.metricsAddress = metricsServer.Addr()
 	coreCertificate, err := tls.LoadX509KeyPair(credentials.coreServerCert, credentials.coreServerKey)
+	if err != nil {
+		return errScenario
+	}
+	coreHandler, err := core.handler()
 	if err != nil {
 		return errScenario
 	}
 	coreServer := &http.Server{
 		ReadHeaderTimeout: 5 * time.Second,
-		Handler:           core.handler(),
+		Handler:           coreHandler,
 		TLSConfig: &tls.Config{
 			MinVersion:   contract.TransportSecurity.MinimumTLSVersion,
 			Certificates: []tls.Certificate{coreCertificate},
@@ -216,6 +403,8 @@ func run() error {
 		"--core-peer-cn", coreCN,
 		"--instance-id", instanceID,
 		"--replica-id", replicaID,
+		"--placement-id", placementID,
+		"--incarnation-id", incarnationID,
 		"--tls-ca-file", credentials.caFile,
 		"--tls-server-cert-file", credentials.runtimeServerCert,
 		"--tls-server-key-file", credentials.runtimeServerKey,
@@ -224,6 +413,8 @@ func run() error {
 		"--tls-crl-file", credentials.crlFile,
 		"--artifact-dir", artifactStore.Root,
 		"--peer-listen", "127.0.0.1:0",
+		"--rest-advertise-url", "https://127.0.0.1:443",
+		"--peer-advertise-endpoint", "127.0.0.1:443",
 		"--peer-identity", runtimePeerURI,
 		"--peer-allowed-caller", callerPeerURI,
 		"--peer-ca-file", credentials.caFile,
@@ -292,7 +483,7 @@ func run() error {
 	defer func() { checkCleanup(session.Close()) }()
 	sut := &harness{client: session, peerAddress: address.PeerListenAddress}
 
-	notReady := sut.call(runParent, request("echo", "tenant-a/site-1", nil, map[string]any{"message": "hello"}))
+	notReady := sut.call(runParent, request("echo", nil, map[string]any{"message": "hello"}))
 	late := result{NotReady: notReady}
 
 	coreCredentials, err := infrastructure.LoadCredentials(contract, infrastructure.CredentialsMaterial{
@@ -355,10 +546,12 @@ func run() error {
 		}
 		return nil
 	}
-	if upload(echoDigest, echo, "echo-module-upload") != nil || upload(slowDigest, slow, "slow-module-upload") != nil {
+	if upload(echoDigest, echo, "echo-module-upload") != nil || upload(slowDigest, slow, "slow-module-upload") != nil ||
+		upload(hostDigest, hostModule, "host-module-upload") != nil ||
+		upload(drainHostDigest, drainHostModule, "drain-host-module-upload") != nil {
 		return errScenario
 	}
-	ack, err := client.Reload(ctx, sdkmodels.Reload{Generation: "runtime-invoke-slow", SHA256: core.generations["runtime-invoke-slow"].digest, SchemaVersion: schemaV1})
+	ack, err := client.Reload(ctx, sdkmodels.Reload{Generation: "runtime-invoke-slow", SHA256: core.generations["runtime-invoke-slow"].digest, SchemaVersion: schemaVersion})
 	if err != nil || !ack.Applied {
 		if _, err := fmt.Fprintf(os.Stderr, "reload slow refused ack=%+v err=%v\n", ack, err); err != nil {
 			os.Exit(1)
@@ -370,11 +563,11 @@ func run() error {
 		return errScenario
 	}
 	late.Cancelled = sut.callCancelledAlong(200*time.Millisecond, protocolpeer.Method("runtime.invoke"),
-		request("spin", "tenant-a/site-1", nil, map[string]any{}))
+		request("spin", nil, map[string]any{}))
 	late.Timeout = sut.callRaw(runParent, protocolpeer.Method("runtime.invoke"),
-		request("spin", "tenant-a/site-1", nil, map[string]any{}))
+		request("spin", nil, map[string]any{}))
 
-	echoAck, err := client.Reload(ctx, sdkmodels.Reload{Generation: "runtime-invoke-echo", SHA256: core.generations["runtime-invoke-echo"].digest, SchemaVersion: schemaV1})
+	echoAck, err := client.Reload(ctx, sdkmodels.Reload{Generation: "runtime-invoke-echo", SHA256: core.generations["runtime-invoke-echo"].digest, SchemaVersion: schemaVersion})
 	if err != nil || !echoAck.Applied {
 		if _, err := fmt.Fprintf(os.Stderr, "reload echo refused ack=%+v err=%v\n", echoAck, err); err != nil {
 			os.Exit(1)
@@ -386,25 +579,51 @@ func run() error {
 		return errScenario
 	}
 
-	late.Success = sut.call(runParent, request("echo", "tenant-a/site-1", nil, map[string]any{"message": "hello"}))
-	late.SuccessWithEntity = sut.call(runParent, request("echo", "tenant-a/site-1", []string{"entity1"}, map[string]any{"message": "go"}))
-	late.UnknownCommand = sut.call(runParent, request("missing", "tenant-a/site-1", nil, map[string]any{}))
-	late.ForbiddenScope = sut.call(runParent, request("echo", "tenant-a/site-2", nil, map[string]any{}))
-	late.ForbiddenEntity = sut.call(runParent, request("echo", "tenant-a/site-1", []string{"entity3"}, map[string]any{}))
-	late.InvalidRequest = sut.call(runParent, requestWithField("echo", "tenant-a/site-1", map[string]any{"bogus": true}))
-	late.PayloadTooLarge = sut.call(runParent, request("echo", "tenant-a/site-1", nil, map[string]any{"blob": strings.Repeat("x", 1<<20+256)}))
+	late.Success = sut.call(runParent, request("echo", nil, map[string]any{"message": "hello"}))
+	late.UnknownCommand = sut.call(runParent, request("missing", nil, map[string]any{}))
+	late.InvalidRequest = sut.call(runParent, requestWithField("echo", map[string]any{"bogus": true}))
+	late.PayloadTooLarge = sut.call(runParent, request("echo", nil, map[string]any{"blob": strings.Repeat("x", 1<<20+256)}))
 	late.UnknownMethod = sut.callRaw(runParent, protocolpeer.Method("runtime.noop"), []byte(`{}`))
 	late.Unauthorized = sut.callAs(outsiderURI, credentials, runParent, protocolpeer.Method("runtime.invoke"),
-		request("echo", "tenant-a/site-1", nil, map[string]any{"message": "hello"}))
+		request("echo", nil, map[string]any{"message": "hello"}))
 	late.Envelope = sut.call(runParent, envelopePayload(
-		request("echo", "tenant-a/site-1", nil, map[string]any{"message": "wrapped"})))
-
-	// Keep a real Runtime child-process invocation in flight while shutdown is
-	// requested. The long-running module is bounded by the ABI deadline; Runtime
-	// must fence new work and wait for this admitted call before exiting.
+		request("echo", nil, map[string]any{"message": "wrapped"})))
 	if _, err := client.Reload(ctx, sdkmodels.Reload{
-		Generation: "runtime-invoke-slow", SHA256: core.generations["runtime-invoke-slow"].digest,
-		SchemaVersion: schemaV1,
+		Generation: "runtime-invoke-host", SHA256: core.generations["runtime-invoke-host"].digest, SchemaVersion: schemaVersion,
+	}); err != nil {
+		return errScenario
+	}
+	callContext, cancelHostCall := context.WithCancel(context.Background())
+	hostCallDone := make(chan outcome, 1)
+	go func() {
+		hostCallDone <- sut.call(callContext, request("hostcall", nil, map[string]any{}))
+	}()
+	select {
+	case <-remoteStarted:
+	case <-time.After(5 * time.Second):
+		cancelHostCall()
+		return errors.New("runtime child process did not reach the mock plugin host handler")
+	}
+	cancelHostCall()
+	select {
+	case late.HostCallCancelled.Call = <-hostCallDone:
+	case <-time.After(5 * time.Second):
+		return errors.New("cancelling Runtime child invocation did not complete the caller request")
+	}
+	select {
+	case <-remoteCancelled:
+		late.HostCallCancelled.RemoteHandlerObservedCancel = true
+	case <-time.After(5 * time.Second):
+		return errors.New("runtime child cancellation did not reach the remote plugin handler")
+	}
+	late.HostCallCancelled.DeliveryCount = remoteDeliveries.Load()
+
+	// Hold a real outbound host call until the Runtime has admitted the invoke and
+	// shutdown has fenced new calls. This barrier avoids relying on CPU speed to
+	// make a finite WASM loop overlap the shutdown signal.
+	if _, err := client.Reload(ctx, sdkmodels.Reload{
+		Generation: "runtime-invoke-drain", SHA256: core.generations["runtime-invoke-drain"].digest,
+		SchemaVersion: schemaVersion,
 	}); err != nil {
 		return errScenario
 	}
@@ -412,16 +631,23 @@ func run() error {
 	go func() {
 		callContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		longCall <- sut.call(callContext, request("spin", "tenant-a/site-1", nil, map[string]any{}))
+		longCall <- sut.call(callContext, request("drain", nil, map[string]any{}))
 	}()
-	time.Sleep(200 * time.Millisecond)
+	select {
+	case <-drainCallStarted:
+	case early := <-longCall:
+		return fmt.Errorf("drain host call completed before shutdown admission: %+v", early)
+	case <-time.After(5 * time.Second):
+		return errors.New("runtime invocation did not reach the drain host-call barrier")
+	}
 	if err := command.Process.Signal(os.Interrupt); err != nil {
 		return errScenario
 	}
 	time.Sleep(100 * time.Millisecond)
 	refusalContext, cancelRefusal := context.WithTimeout(context.Background(), 2*time.Second)
-	refusedAfterDrain := sut.call(refusalContext, request("spin", "tenant-a/site-1", nil, map[string]any{}))
+	refusedAfterDrain := sut.call(refusalContext, request("drain", nil, map[string]any{}))
 	cancelRefusal()
+	close(drainCallRelease)
 	acceptedCall := <-longCall
 	select {
 	case processErr := <-processWait:
@@ -539,9 +765,9 @@ func transportKind(err error) string {
 	}
 }
 
-func request(command, scope string, entities []string, input map[string]any) []byte {
-	document := map[string]any{"command": command, "scope": scope, "input": input}
-	if len(entities) > 0 {
+func request(command string, entities []string, input map[string]any) []byte {
+	document := map[string]any{"command": command, "input": input}
+	if entities != nil {
 		document["entities"] = entities
 	}
 	payload, err := json.Marshal(document)
@@ -551,8 +777,8 @@ func request(command, scope string, entities []string, input map[string]any) []b
 	return payload
 }
 
-func requestWithField(command, scope string, fields map[string]any) []byte {
-	document := map[string]any{"command": command, "scope": scope, "input": map[string]any{}}
+func requestWithField(command string, fields map[string]any) []byte {
+	document := map[string]any{"command": command, "input": map[string]any{}}
 	for key, value := range fields {
 		document[key] = value
 	}
@@ -578,8 +804,13 @@ func envelopePayload(body []byte) []byte {
 	return payload
 }
 
-func (core *scenario) handler() http.Handler {
+func (core *scenario) handler() (http.Handler, error) {
 	mux := http.NewServeMux()
+	lifecycleContract, err := infrastructure.LoadReplicaLifecycleContract()
+	if err != nil {
+		return nil, err
+	}
+	lifecyclecore.New(lifecycleContract).Register(mux)
 	pull := core.contract.Core.ConfigPull
 	mux.HandleFunc(pull.Method+" "+pull.PathTemplate, func(writer http.ResponseWriter, request *http.Request) {
 		generation, ok := core.generations[request.PathValue("generation")]
@@ -590,7 +821,7 @@ func (core *scenario) handler() http.Handler {
 		headers := pull.ResponseHeaders
 		writer.Header().Set(headers["generation"], request.PathValue("generation"))
 		writer.Header().Set(headers["sha256"], generation.digest)
-		writer.Header().Set(headers["schemaVersion"], schemaV1)
+		writer.Header().Set(headers["schemaVersion"], schemaVersion)
 		writer.Header().Set(headers["generationState"], "active")
 		writer.Header().Set("Content-Type", pull.ResponseMediaType)
 		writer.WriteHeader(http.StatusOK)
@@ -598,7 +829,70 @@ func (core *scenario) handler() http.Handler {
 			return
 		}
 	})
-	return mux
+	directoryEndpoint := core.directoryContract.Endpoint
+	mux.HandleFunc(directoryEndpoint.Method+" "+directoryEndpoint.Path, func(writer http.ResponseWriter, request *http.Request) {
+		if !core.runtimePeerAuthenticated(request) {
+			http.Error(writer, "peer identity mismatch", http.StatusForbidden)
+			return
+		}
+		query := request.URL.Query()
+		if len(query) != 1 || query.Get(core.directoryContract.Poll.WaitParameter) != "0" {
+			http.Error(writer, "invalid directory request", http.StatusBadRequest)
+			return
+		}
+		now := time.Now().UTC()
+		expires := now.Add(20 * time.Second)
+		eligibleUntil := expires.Add(-time.Second)
+		directory := sdkmodels.PeerDirectory{
+			ContractVersion: sdkmodels.PeerDirectoryContractVersion,
+			Generation:      "directory-1",
+			IssuedAt:        now,
+			ExpiresAt:       expires,
+			Caller:          core.runtimeIdentity,
+			Links: []sdkmodels.PeerLink{{
+				LinkID: "metrics-link", TargetInstanceID: metricsInstanceID,
+				PlacementRule: sdkmodels.PeerPlacementRemote, Carrier: sdkmodels.PeerCarrierTCP,
+				SecurityProfile: sdkmodels.PeerSecurityMTLS, RequiredPeerContracts: []sdkmodels.ContractRange{},
+				Replicas: []sdkmodels.PeerDirectoryReplica{{
+					Identity: sdkmodels.PeerReplicaID{
+						InstanceID: metricsInstanceID, ReplicaID: metricsReplicaID,
+						IncarnationID: metricsIncarnationID, PlacementID: metricsPlacementID,
+					},
+					Endpoint: core.metricsAddress, Eligibility: sdkmodels.PeerEligibilityReady,
+					EligibleUntil: &eligibleUntil, Weight: 1, PeerContracts: []sdkmodels.ContractVersion{},
+				}},
+			}},
+		}
+		if directory.Validate() != nil {
+			http.Error(writer, "invalid fixture directory", http.StatusInternalServerError)
+			return
+		}
+		body, err := json.Marshal(directory)
+		if err != nil {
+			http.Error(writer, "directory encoding failed", http.StatusInternalServerError)
+			return
+		}
+		writer.Header().Set("Content-Type", core.directoryContract.DirectoryMediaType)
+		writer.Header().Set("Cache-Control", "no-store")
+		writer.Header().Set("ETag", `"directory-1"`)
+		writer.WriteHeader(core.directoryContract.Responses.Directory.Status)
+		if _, err := writer.Write(body); err != nil {
+			return
+		}
+	})
+	return mux, nil
+}
+
+func (core *scenario) runtimePeerAuthenticated(request *http.Request) bool {
+	if request.TLS == nil || len(request.TLS.PeerCertificates) != 1 {
+		return false
+	}
+	for _, uri := range request.TLS.PeerCertificates[0].URIs {
+		if uri.String() == runtimePeerURI {
+			return true
+		}
+	}
+	return false
 }
 
 func publish(document string) storedGeneration {
@@ -606,8 +900,16 @@ func publish(document string) storedGeneration {
 	return storedGeneration{bytes: bytes, digest: sdkmodels.Digest(bytes)}
 }
 
-func configurationDocument(groupID, moduleDigest, commandName string) string {
-	return fmt.Sprintf(`{"schemaVersion":"1","groupId":%q,"modelInstanceId":"invoke","module":{"sha256":%q},"commands":[{"name":%q,"export":"invoke","tenantSites":["tenant-a/site-1"],"entities":["entity1","entity2"]}]}`, groupID, moduleDigest, commandName)
+func configurationDocument(_ string, moduleDigest, commandName string) string {
+	return fmt.Sprintf(`{"schemaVersion":"2","modules":[{"moduleId":"app","sha256":%q}],"commands":[{"name":%q,"moduleId":"app","export":"invoke","entities":["entity1","entity2"]}]}`, moduleDigest, commandName)
+}
+
+func hostCallConfigurationDocument(moduleDigest string) string {
+	return fmt.Sprintf(`{"schemaVersion":"2","modules":[{"moduleId":"app","sha256":%q}],"commands":[{"name":"hostcall","moduleId":"app","export":"invoke","entities":["entity1"],"calls":[{"plugin":%q,"method":"metrics.aggregate"}]}]}`, moduleDigest, metricsInstanceID)
+}
+
+func drainHostConfigurationDocument(moduleDigest string) string {
+	return fmt.Sprintf(`{"schemaVersion":"2","modules":[{"moduleId":"app","sha256":%q}],"commands":[{"name":"drain","moduleId":"app","export":"invoke","entities":["entity1"],"calls":[{"plugin":%q,"method":"metrics.aggregate"}]}]}`, moduleDigest, metricsInstanceID)
 }
 
 type testCredentials struct {
@@ -627,6 +929,8 @@ type testCredentials struct {
 	callerPeerKey     string
 	outsiderPeerCert  string
 	outsiderPeerKey   string
+	metricsPeerCert   string
+	metricsPeerKey    string
 }
 
 func issueTestCredentials(directory string) (testCredentials, error) {
@@ -660,6 +964,7 @@ func issueTestCredentials(directory string) (testCredentials, error) {
 		runtimePeerCert: filepath.Join(directory, "runtime-peer.pem"), runtimePeerKey: filepath.Join(directory, "runtime-peer-key.pem"),
 		callerPeerCert: filepath.Join(directory, "caller-peer.pem"), callerPeerKey: filepath.Join(directory, "caller-peer-key.pem"),
 		outsiderPeerCert: filepath.Join(directory, "outsider-peer.pem"), outsiderPeerKey: filepath.Join(directory, "outsider-peer-key.pem"),
+		metricsPeerCert: filepath.Join(directory, "metrics-peer.pem"), metricsPeerKey: filepath.Join(directory, "metrics-peer-key.pem"),
 	}
 	if err := writeSecure(paths.caFile, rootPEM); err != nil {
 		return testCredentials{}, errScenario
@@ -687,6 +992,7 @@ func issueTestCredentials(directory string) (testCredentials, error) {
 		{runtimeCN, runtimePeerURI, paths.runtimePeerCert, paths.runtimePeerKey},
 		{callerCN, callerPeerURI, paths.callerPeerCert, paths.callerPeerKey},
 		{outsiderCN, outsiderURI, paths.outsiderPeerCert, paths.outsiderPeerKey},
+		{"metrics-plugin", metricsPeerURI, paths.metricsPeerCert, paths.metricsPeerKey},
 	} {
 		if err := issuePeerLeaf(now, root, rootKey, int64(index+10), pair.cn, pair.uri, pair.cert, pair.key); err != nil {
 			return testCredentials{}, errScenario
@@ -736,6 +1042,7 @@ func issuePeerLeaf(now time.Time, authority *x509.Certificate, authorityKey *ecd
 		KeyUsage:    x509.KeyUsageDigitalSignature,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		DNSNames:    []string{"localhost"},
+		IPAddresses: []net.IP{net.ParseIP("127.0.0.1")},
 		URIs:        []*url.URL{peerURI},
 	}
 	certificateDER, err := x509.CreateCertificate(rand.Reader, template, authority, &key.PublicKey, authorityKey)

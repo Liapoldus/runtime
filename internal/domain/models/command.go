@@ -2,8 +2,14 @@
 package models
 
 type Command struct {
-	Name        string   `json:"name"`
-	Export      string   `json:"export"`
-	TenantSites []string `json:"tenantSites"`
-	Entities    []string `json:"entities"`
+	Name     string         `json:"name"`
+	ModuleID string         `json:"moduleId"`
+	Export   string         `json:"export"`
+	Entities []string       `json:"entities"`
+	Calls    []PluginMethod `json:"calls,omitempty"`
+}
+
+type PluginMethod struct {
+	Plugin string `json:"plugin"`
+	Method string `json:"method"`
 }

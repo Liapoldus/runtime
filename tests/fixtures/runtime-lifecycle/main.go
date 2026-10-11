@@ -27,11 +27,12 @@ import (
 	"sort"
 	"time"
 
-	sdkmodels "github.com/Liapoldus/plugin-sdk/domain/models"
-	"github.com/Liapoldus/plugin-sdk/infrastructure"
+	sdkmodels "github.com/Liapoldus/plugin-sdk/v2/domain/models"
+	"github.com/Liapoldus/plugin-sdk/v2/infrastructure"
 	"github.com/Liapoldus/runtime/contracts"
 	"github.com/Liapoldus/runtime/internal/domain/models"
 	"github.com/Liapoldus/runtime/internal/infrastructure/artifacts"
+	"github.com/Liapoldus/runtime/tests/fixtures/lifecyclecore"
 )
 
 var errScenario = errors.New("runtime Reload integration scenario failed")
@@ -42,9 +43,11 @@ const (
 	coreCN         = "runtime-test-core"
 	runtimeCN      = "runtime-test-plugin"
 	callerCN       = "runtime-test-caller"
-	runtimePeerURI = "spiffe://liapoldus.test/runtime"
+	runtimePeerURI = "spiffe://liapoldus/plugin/runtime-e2e/runtime-e2e-1/inc-runtime"
+	placementID    = "node-runtime"
+	incarnationID  = "inc-runtime"
 	callerPeerURI  = "spiffe://liapoldus.test/server"
-	schemaV1       = "1"
+	schemaVersion  = "2"
 )
 
 type storedGeneration struct {
@@ -55,6 +58,7 @@ type storedGeneration struct {
 type scenario struct {
 	contract    infrastructure.HTTPContract
 	generations map[string]storedGeneration
+	lifecycle   *lifecyclecore.Core
 }
 
 type readinessResult struct {
@@ -71,6 +75,7 @@ type result struct {
 	AfterValid    readinessResult `json:"afterValid"`
 	Artifacts     map[string]any  `json:"artifacts"`
 	ModuleCatalog map[string]any  `json:"moduleCatalog"`
+	LeaseFailure  map[string]any  `json:"leaseFailure"`
 }
 
 func main() {
@@ -131,9 +136,13 @@ func run() error {
 	if err != nil {
 		return errScenario
 	}
+	coreHandler, err := core.handler()
+	if err != nil {
+		return errScenario
+	}
 	coreServer := &http.Server{
 		ReadHeaderTimeout: 5 * time.Second,
-		Handler:           core.handler(),
+		Handler:           coreHandler,
 		TLSConfig: &tls.Config{
 			MinVersion:   contract.TransportSecurity.MinimumTLSVersion,
 			Certificates: []tls.Certificate{coreCertificate},
@@ -165,6 +174,8 @@ func run() error {
 		"--core-peer-cn", coreCN,
 		"--instance-id", instanceID,
 		"--replica-id", replicaID,
+		"--placement-id", placementID,
+		"--incarnation-id", incarnationID,
 		"--tls-ca-file", credentials.caFile,
 		"--tls-server-cert-file", credentials.runtimeServerCert,
 		"--tls-server-key-file", credentials.runtimeServerKey,
@@ -173,6 +184,8 @@ func run() error {
 		"--tls-crl-file", credentials.crlFile,
 		"--artifact-dir", artifactStore.Root,
 		"--peer-listen", "127.0.0.1:0",
+		"--rest-advertise-url", "https://127.0.0.1:443",
+		"--peer-advertise-endpoint", "127.0.0.1:443",
 		"--peer-identity", runtimePeerURI,
 		"--peer-allowed-caller", callerPeerURI,
 		"--peer-ca-file", credentials.caFile,
@@ -191,8 +204,9 @@ func run() error {
 	}
 	processWait := make(chan error, 1)
 	go func() { processWait <- command.Wait() }()
+	processWaited := false
 	defer func() {
-		if command.Process != nil {
+		if command.Process != nil && !processWaited {
 			checkCleanup(command.Process.Signal(os.Interrupt))
 			select {
 			case <-processWait:
@@ -320,6 +334,21 @@ func run() error {
 	if err != nil || afterValid.Generation != "runtime-generation-3" || afterValid.PendingGeneration != "" || !afterValid.Ready {
 		return errScenario
 	}
+	if core.lifecycle == nil {
+		return errScenario
+	}
+	core.lifecycle.RefuseRenewals()
+	select {
+	case processErr := <-processWait:
+		processWaited = true
+		if processErr == nil || core.lifecycle.Registered(sdkmodels.PeerReplicaID{
+			InstanceID: instanceID, ReplicaID: replicaID, IncarnationID: incarnationID, PlacementID: placementID,
+		}) {
+			return errScenario
+		}
+	case <-time.After(15 * time.Second):
+		return fmt.Errorf("runtime did not fence and exit after Core refused lease renewal")
+	}
 	output := result{
 		Initial:       readinessResult{Generation: initial.Generation, Ready: initial.Ready},
 		Invalid:       map[string]any{"applied": invalidAck.Applied, "outcome": string(client.ClassifyOutcome(invalidErr))},
@@ -328,12 +357,19 @@ func run() error {
 		AfterValid:    readinessResult{Generation: afterValid.Generation, PendingGeneration: afterValid.PendingGeneration, Ready: afterValid.Ready},
 		Artifacts:     map[string]any{"accepted": 2, "status": adminActions.Publish.AcceptedHTTPStatus},
 		ModuleCatalog: map[string]any{"status": catalog.StatusCode, "count": len(catalogBody.Items)},
+		LeaseFailure:  map[string]any{"processExited": true, "deregistered": true},
 	}
 	return json.NewEncoder(os.Stdout).Encode(output)
 }
 
-func (core *scenario) handler() http.Handler {
+func (core *scenario) handler() (http.Handler, error) {
 	mux := http.NewServeMux()
+	lifecycleContract, err := infrastructure.LoadReplicaLifecycleContract()
+	if err != nil {
+		return nil, err
+	}
+	core.lifecycle = lifecyclecore.New(lifecycleContract)
+	core.lifecycle.Register(mux)
 	pull := core.contract.Core.ConfigPull
 	mux.HandleFunc(pull.Method+" "+pull.PathTemplate, func(writer http.ResponseWriter, request *http.Request) {
 		generation, ok := core.generations[request.PathValue("generation")]
@@ -344,7 +380,7 @@ func (core *scenario) handler() http.Handler {
 		headers := pull.ResponseHeaders
 		writer.Header().Set(headers["generation"], request.PathValue("generation"))
 		writer.Header().Set(headers["sha256"], generation.digest)
-		writer.Header().Set(headers["schemaVersion"], schemaV1)
+		writer.Header().Set(headers["schemaVersion"], schemaVersion)
 		writer.Header().Set(headers["generationState"], "active")
 		writer.Header().Set("Content-Type", pull.ResponseMediaType)
 		writer.WriteHeader(http.StatusOK)
@@ -352,7 +388,7 @@ func (core *scenario) handler() http.Handler {
 			return
 		}
 	})
-	return mux
+	return mux, nil
 }
 
 func publish(document string) storedGeneration {
@@ -360,16 +396,16 @@ func publish(document string) storedGeneration {
 	return storedGeneration{bytes: bytes, digest: sdkmodels.Digest(bytes)}
 }
 
-func configurationDocument(groupID, moduleDigest string, invalid bool) string {
+func configurationDocument(_ string, moduleDigest string, invalid bool) string {
 	unknown := ""
 	if invalid {
 		unknown = `,"unknown":true`
 	}
-	return fmt.Sprintf(`{"schemaVersion":"1","groupId":%q,"modelInstanceId":"domain","module":{"sha256":%q},"commands":[{"name":"submit","export":"invoke","tenantSites":["tenant/site"],"entities":["entries"]}]%s}`, groupID, moduleDigest, unknown)
+	return fmt.Sprintf(`{"schemaVersion":"2","modules":[{"moduleId":"app","sha256":%q}],"commands":[{"name":"submit","moduleId":"app","export":"invoke","entities":["entries"]}]%s}`, moduleDigest, unknown)
 }
 
 func descriptor(generation string, stored storedGeneration) sdkmodels.Reload {
-	return sdkmodels.Reload{Generation: generation, SHA256: stored.digest, SchemaVersion: schemaV1}
+	return sdkmodels.Reload{Generation: generation, SHA256: stored.digest, SchemaVersion: schemaVersion}
 }
 
 type testCredentials struct {

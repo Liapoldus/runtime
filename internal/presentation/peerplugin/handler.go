@@ -9,7 +9,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/Liapoldus/pluginprotocol/v2/presentation/peer"
+	"github.com/Liapoldus/pluginprotocol/v3/presentation/peer"
 	"github.com/Liapoldus/runtime/contracts"
 	runtimemodule "github.com/Liapoldus/runtime/internal/application/module"
 )
@@ -94,8 +94,6 @@ func invokeErrorCode(err error) string {
 		return contracts.CodeNotReady
 	case errors.Is(err, runtimemodule.ErrInvokeUnknownCommand):
 		return contracts.CodeUnknownCommand
-	case errors.Is(err, runtimemodule.ErrInvokeForbiddenScope):
-		return contracts.CodeForbiddenScope
 	case errors.Is(err, runtimemodule.ErrInvokeForbiddenEntity):
 		return contracts.CodeForbiddenEntity
 	case errors.Is(err, runtimemodule.ErrInvokePayloadTooLarge):
@@ -104,6 +102,8 @@ func invokeErrorCode(err error) string {
 		return contracts.CodeExecutionTimeout
 	case errors.Is(err, runtimemodule.ErrInvokeCancelled):
 		return contracts.CodeCancelled
+	case errors.Is(err, runtimemodule.ErrInvokeOverloaded):
+		return contracts.CodeOverloaded
 	default:
 		return contracts.CodeExecutionFailed
 	}

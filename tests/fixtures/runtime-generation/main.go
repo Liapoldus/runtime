@@ -10,7 +10,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Liapoldus/plugin-sdk/domain/models"
+	"github.com/Liapoldus/plugin-sdk/v2/domain/models"
 	runtimeconfig "github.com/Liapoldus/runtime/internal/application/config"
 	"github.com/Liapoldus/runtime/internal/infrastructure/artifacts"
 )
@@ -29,19 +29,16 @@ func main() {
 		fail()
 	}
 	firstModule, err := store.Get(ctx, firstDigest)
-	firstDocument := document("first", firstDigest)
-	if err != nil || configurationStore.Activate(ctx, "runtime-generation-1", "1", models.Digest(firstDocument), firstDocument, firstModule) != nil {
+	firstDocument := document(firstDigest)
+	if err != nil || configurationStore.Activate(ctx, "runtime-generation-1", "2", models.Digest(firstDocument), firstDocument, map[string][]byte{"app": firstModule}) != nil {
 		fail()
 	}
 
 	secondModule := append(append([]byte(nil), abiModule...), 0, 3, 1, 'x', 0)
 	secondDigest := digest(secondModule)
-	missingErr := readAndActivate(ctx, store, configurationStore, secondDigest, document("second", secondDigest))
-	mismatchErr := configurationStore.Activate(ctx, "runtime-generation-2", "1", models.Digest(document("second", secondDigest)), document("second", secondDigest), firstModule)
-	before, ok := configurationStore.Snapshot()
-	if !ok {
-		fail()
-	}
+	missingErr := readAndActivate(ctx, store, configurationStore, secondDigest, document(secondDigest))
+	mismatchErr := configurationStore.Activate(ctx, "runtime-generation-2", "2", models.Digest(document(secondDigest)), document(secondDigest), map[string][]byte{"app": firstModule})
+	before := snapshotView(configurationStore, "submit")
 	if err := store.Put(ctx, secondDigest, bytes.NewReader(secondModule)); err != nil {
 		fail()
 	}
@@ -63,20 +60,17 @@ func main() {
 		fail()
 	}
 	secondBytes, err := store.Get(ctx, secondDigest)
-	if err != nil || configurationStore.Activate(ctx, "runtime-generation-2", "1", models.Digest(document("second", secondDigest)), document("second", secondDigest), secondBytes) != nil {
+	if err != nil || configurationStore.Activate(ctx, "runtime-generation-2", "2", models.Digest(document(secondDigest)), document(secondDigest), map[string][]byte{"app": secondBytes}) != nil {
 		fail()
 	}
-	after, ok := configurationStore.Snapshot()
-	if !ok {
-		fail()
-	}
+	after := snapshotView(configurationStore, "submit")
 	if err := json.NewEncoder(os.Stdout).Encode(map[string]any{
 		"missingArtifactRejected":        missingErr != nil,
 		"mismatchedArtifactRejected":     mismatchErr != nil,
 		"tamperedArtifactRejected":       tamperedErr != nil,
-		"activePreservedBeforeCandidate": snapshotView(before),
+		"activePreservedBeforeCandidate": before,
 		"candidateArtifactAccepted":      true,
-		"activePairPromotedTogether":     snapshotView(after),
+		"activePairPromotedTogether":     after,
 	}); err != nil {
 		os.Exit(1)
 	}
@@ -88,21 +82,29 @@ func readAndActivate(ctx context.Context, store artifacts.Store, active *runtime
 		return err
 	}
 	defer clear(module)
-	return active.Activate(ctx, "runtime-generation-2", "1", models.Digest(raw), raw, module)
+	return active.Activate(ctx, "runtime-generation-2", "2", models.Digest(raw), raw, map[string][]byte{"app": module})
 }
 
-func snapshotView(snapshot runtimeconfig.ConfigurationSnapshot) map[string]any {
-	actual := sha256.Sum256(snapshot.Module)
-	return map[string]any{
-		"generation":             snapshot.Generation,
-		"groupId":                snapshot.Settings.GroupID,
-		"moduleDigest":           snapshot.Settings.Module.SHA256,
-		"moduleBytesMatchDigest": hex.EncodeToString(actual[:]) == snapshot.Settings.Module.SHA256,
+func snapshotView(store *runtimeconfig.ConfigurationStore, commandName string) map[string]any {
+	var result map[string]any
+	found, err := store.WithCommand(commandName, func(view runtimeconfig.CommandView) error {
+		actual := sha256.Sum256(view.Module)
+		result = map[string]any{
+			"generation":             view.Generation,
+			"moduleId":               view.Command.ModuleID,
+			"moduleDigest":           view.ModuleDigest,
+			"moduleBytesMatchDigest": hex.EncodeToString(actual[:]) == view.ModuleDigest,
+		}
+		return nil
+	})
+	if err != nil || !found {
+		fail()
 	}
+	return result
 }
 
-func document(groupID, moduleDigest string) []byte {
-	return []byte(fmt.Sprintf(`{"schemaVersion":"1","groupId":%q,"modelInstanceId":"domain","module":{"sha256":%q},"commands":[{"name":"submit","export":"invoke","tenantSites":["tenant/site"],"entities":["entries"]}]}`, groupID, moduleDigest))
+func document(moduleDigest string) []byte {
+	return []byte(fmt.Sprintf(`{"schemaVersion":"2","modules":[{"moduleId":"app","sha256":%q}],"commands":[{"name":"submit","moduleId":"app","export":"invoke","entities":["entries"]}]}`, moduleDigest))
 }
 
 func digest(value []byte) string {

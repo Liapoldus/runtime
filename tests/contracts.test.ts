@@ -1,9 +1,9 @@
-import manifest from '../contracts/v1/plugin.json';
-import wasmABI from '../contracts/v1/wasm-abi.json';
-import adminSurface from '../contracts/v1/admin-surface.json';
-import adminSurfaceSchema from '../contracts/v1/admin-surface.schema.json';
-import adminActionsSchema from '../contracts/v1/admin-actions.schema.json';
-import actions from '../contracts/v1/admin-actions.json';
+import manifest from '../contracts/v2/plugin.json';
+import wasmABI from '../contracts/v2/wasm-abi.json';
+import adminSurface from '../contracts/v2/admin-surface.json';
+import adminSurfaceSchema from '../contracts/v2/admin-surface.schema.json';
+import adminActionsSchema from '../contracts/v2/admin-actions.schema.json';
+import actions from '../contracts/v2/admin-actions.json';
 import { describe, expect, it } from 'vitest';
 
 
@@ -29,10 +29,10 @@ describe('product contract ownership', () => {
   it('publishes the generic artifact-stream action for immutable WASM modules', () => {
     expect(manifest.adminSurface).toMatchObject({
       version: 1,
-      descriptor: 'contracts/v1/admin-surface.json',
-      schema: 'contracts/v1/admin-surface.schema.json',
-      actions: 'contracts/v1/admin-actions.json',
-      actionsSchema: 'contracts/v1/admin-actions.schema.json',
+      descriptor: 'contracts/v2/admin-surface.json',
+      schema: 'contracts/v2/admin-surface.schema.json',
+      actions: 'contracts/v2/admin-actions.json',
+      actionsSchema: 'contracts/v2/admin-actions.schema.json',
     });
     expect(adminSurface).toMatchObject({
       version: 1,
@@ -64,5 +64,10 @@ describe('product contract ownership', () => {
     expect(adminSurfaceSchema.properties.pages.items.properties.sections.items.properties.actions.items.properties.artifactInput).toBeDefined();
     expect(adminActionsSchema.additionalProperties).toBe(false);
     expect(adminActionsSchema.required).toEqual(['runtime.modules.list', 'runtime.modules.publish']);
+  });
+
+  it('bounds the aggregate WASM bytes held by one configuration generation', () => {
+    expect(wasmABI.limits.maxModuleBytes).toBe(16 * 1024 * 1024);
+    expect(wasmABI.limits.maxGenerationArtifactBytes).toBe(128 * 1024 * 1024);
   });
 });

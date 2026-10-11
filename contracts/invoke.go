@@ -16,14 +16,14 @@ const invokeSemantics string = "Один транспортный вызов в�
 
 // InvokeErrorDefinitions returns an independent map for each caller.
 func InvokeErrorDefinitions() InvokeErrors {
-	return InvokeErrors{Version: 1, Capability: InvokeCapability, Semantics: invokeSemantics, Errors: map[string]InvokeProblem{
+	return InvokeErrors{Version: 2, Capability: InvokeCapability, Semantics: invokeSemantics, Errors: map[string]InvokeProblem{
 		CodeNotReady:         {HTTP: 503, Retryable: true},
 		CodeUnknownCommand:   {HTTP: 404, Retryable: false},
-		CodeForbiddenScope:   {HTTP: 403, Retryable: false},
 		CodeForbiddenEntity:  {HTTP: 403, Retryable: false},
 		CodeInvalidRequest:   {HTTP: 422, Retryable: false},
 		CodePayloadTooLarge:  {HTTP: 413, Retryable: false},
 		CodeExecutionFailed:  {HTTP: 502, Retryable: false},
+		CodeOverloaded:       {HTTP: 503, Retryable: true},
 		CodeExecutionTimeout: {HTTP: 504, Retryable: false},
 		CodeCancelled:        {HTTP: 499, Retryable: false},
 	}}

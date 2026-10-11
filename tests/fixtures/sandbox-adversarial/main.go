@@ -106,7 +106,7 @@ func main() {
 				step.Input = json.RawMessage("null")
 			}
 			inputBytes := append([]byte(nil), step.Input...)
-			rawOutput, err := (wasm.Executor{}).Execute(ctx, moduleBytes, inputBytes)
+			rawOutput, err := (wasm.Executor{}).ExecuteWithHostExport(ctx, moduleBytes, "invoke", inputBytes, nil)
 			result.Execute = runGate(func() error { return err }, rawOutput)
 		}
 		results = append(results, result)

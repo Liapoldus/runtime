@@ -1,7 +1,9 @@
-github.com/Liapoldus/plugin-sdk v1.0.0 h1:IBjWEZPcx+uwBk6+MyZsew4S9AvhlKFJuBury/44jgg=
-github.com/Liapoldus/plugin-sdk v1.0.0/go.mod h1:a85TGnGtQesjqjHqX4Eu7T13hp5NLcYBt1dLdStGzQQ=
-github.com/Liapoldus/pluginprotocol/v2 v2.0.0 h1:8wMThgpYgc5PqMeQ0FPLx/JLPnqvbre22TWoEfndJpo=
-github.com/Liapoldus/pluginprotocol/v2 v2.0.0/go.mod h1:0pPPQFfSNWokkR0HUq1ggZKqt1JijDVjzkTz8GE3WBQ=
+github.com/Liapoldus/plugin-sdk/v2 v2.0.0 h1:T/+jAyVcLp7lfcXCaqBLC1uzi3xpkGW+H5iP9kHiCJA=
+github.com/Liapoldus/plugin-sdk/v2 v2.0.0/go.mod h1:RmplAk5L6MMkoLjc2Hst/aLX2lNmznpQ+c5B08WtfQk=
+github.com/Liapoldus/pluginprotocol/v3 v3.0.0 h1:HBAKukJ/BVmrreiSS94x/ralNO0867BjwR5wgSpG15I=
+github.com/Liapoldus/pluginprotocol/v3 v3.0.0/go.mod h1:jmcRMiFjKa/ra7vG0xz07IJPztVdJ+yUn/qQtgZN/Ug=
+github.com/Microsoft/go-winio v0.6.2 h1:F2VQgta7ecxGYO8k3ZZz3RS8fVIXVxONVUPlNERoyfY=
+github.com/Microsoft/go-winio v0.6.2/go.mod h1:yd8OoFMLzJbo9gZq8j5qaps8bJ9aShtEA8Ipt1oGCvU=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=

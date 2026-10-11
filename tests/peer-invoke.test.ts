@@ -18,10 +18,7 @@ interface Outcome {
 interface ScenarioResult {
   notReady: Outcome;
   success: Outcome;
-  successWithEntity: Outcome;
   unknownCommand: Outcome;
-  forbiddenScope: Outcome;
-  forbiddenEntity: Outcome;
   invalidRequest: Outcome;
   payloadTooLarge: Outcome;
   unknownMethod: Outcome;
@@ -29,6 +26,11 @@ interface ScenarioResult {
   cancelled: Outcome;
   timeout: Outcome;
   envelope: Outcome;
+  hostCallCancelled: {
+    call: Outcome;
+    remoteHandlerObservedCancel: boolean;
+    deliveryCount: number;
+  };
   shutdownDrain: {
     acceptedCall: Outcome;
     refusedAfterDrain: Outcome;
@@ -59,28 +61,13 @@ describe('runtime.invoke peer surface', () => {
     const output = results.success.output as Record<string, unknown>;
     expect(output).toMatchObject({
       command: 'echo',
-      scope: 'tenant-a/site-1',
       entities: [],
       input: { message: 'hello' },
     });
   });
 
-  it('passes declared entities through to the module', () => {
-    const output = results.successWithEntity.output as Record<string, unknown>;
-    expect(output.entities).toEqual(['entity1']);
-    expect(output.input).toMatchObject({ message: 'go' });
-  });
-
   it('rejects an undeclared command', () => {
     expect(results.unknownCommand).toMatchObject({ status: 404, code: 'unknown_command' });
-  });
-
-  it('rejects a scope outside the command allowlist', () => {
-    expect(results.forbiddenScope).toMatchObject({ status: 403, code: 'forbidden_scope' });
-  });
-
-  it('rejects an entity outside the command allowlist', () => {
-    expect(results.forbiddenEntity).toMatchObject({ status: 403, code: 'forbidden_entity' });
   });
 
   it('rejects a malformed request document', () => {
@@ -114,9 +101,21 @@ describe('runtime.invoke peer surface', () => {
     expect(output.input).toMatchObject({ message: 'wrapped' });
   });
 
+  it('propagates child-process invocation cancellation through a live plugin host call', () => {
+    expect(results.hostCallCancelled.call.status).not.toBe(200);
+    expect(
+      results.hostCallCancelled.call.code === 'cancelled' ||
+        results.hostCallCancelled.call.transport === 'cancelled',
+    ).toBe(true);
+    expect(results.hostCallCancelled).toMatchObject({
+      remoteHandlerObservedCancel: true,
+      deliveryCount: 1,
+    });
+  });
+
   it('drains an admitted peer invocation on shutdown and fences new invocations', () => {
     expect(results.shutdownDrain).toMatchObject({
-      acceptedCall: { status: 504, code: 'execution_timeout' },
+      acceptedCall: { status: 200, command: 'drain' },
       refusedAfterDrain: { status: 503, code: 'not_ready' },
       processExitedAfterCall: true,
     });

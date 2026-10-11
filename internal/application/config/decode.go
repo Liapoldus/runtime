@@ -30,35 +30,38 @@ func DecodeConfiguration(raw []byte) (models.Configuration, string) {
 	return config, ""
 }
 
-// ValidateConfiguration checks product ownership and scope boundaries before
-// a candidate can be compiled or activated.
+// ValidateConfiguration checks module, command and target references before a
+// candidate can be compiled or activated.
 func ValidateConfiguration(config models.Configuration) string {
-	if config.SchemaVersion != configurationSchemaVersion || !ValidIdentifier(config.GroupID) || !ValidIdentifier(config.ModelInstanceID) || len(config.Commands) == 0 || len(config.Commands) > configurationMaxCommands {
+	if config.SchemaVersion != configurationSchemaVersion || len(config.Modules) == 0 || len(config.Modules) > configurationMaxModules || len(config.Commands) == 0 || len(config.Commands) > configurationMaxCommands {
 		return codeInvalidConfiguration
 	}
-	if len(config.Module.SHA256) != moduleDigestHexBytes || strings.ToLower(config.Module.SHA256) != config.Module.SHA256 {
-		return codeInvalidDigest
-	}
-	if _, err := hex.DecodeString(config.Module.SHA256); err != nil {
-		return codeInvalidDigest
+	modules := make(map[string]struct{}, len(config.Modules))
+	for _, module := range config.Modules {
+		if !ValidIdentifier(module.ID) {
+			return codeInvalidConfiguration
+		}
+		if len(module.SHA256) != moduleDigestHexBytes || strings.ToLower(module.SHA256) != module.SHA256 {
+			return codeInvalidDigest
+		}
+		if _, err := hex.DecodeString(module.SHA256); err != nil {
+			return codeInvalidDigest
+		}
+		if _, duplicate := modules[module.ID]; duplicate {
+			return codeInvalidConfiguration
+		}
+		modules[module.ID] = struct{}{}
 	}
 	seen := make(map[string]struct{}, len(config.Commands))
 	for _, command := range config.Commands {
-		if !ValidIdentifier(command.Name) || !ValidIdentifier(command.Export) || len(command.Entities) == 0 || len(command.Entities) > commandMaxEntities {
+		if !ValidIdentifier(command.Name) || !ValidIdentifier(command.ModuleID) || !ValidIdentifier(command.Export) {
 			return codeInvalidCommand
 		}
-		if len(command.TenantSites) == 0 || len(command.TenantSites) > commandMaxTenantSites {
-			return codeMissingScope
+		if _, found := modules[command.ModuleID]; !found {
+			return codeInvalidCommand
 		}
-		seenScopes := make(map[string]struct{}, len(command.TenantSites))
-		for _, scope := range command.TenantSites {
-			if !ValidTenantSite(scope) {
-				return codeInvalidScope
-			}
-			if _, duplicate := seenScopes[scope]; duplicate {
-				return codeInvalidScope
-			}
-			seenScopes[scope] = struct{}{}
+		if len(command.Entities) == 0 || len(command.Entities) > commandMaxEntities {
+			return codeInvalidCommand
 		}
 		seenEntities := make(map[string]struct{}, len(command.Entities))
 		for _, entity := range command.Entities {
@@ -69,6 +72,20 @@ func ValidateConfiguration(config models.Configuration) string {
 				return codeInvalidCommand
 			}
 			seenEntities[entity] = struct{}{}
+		}
+		if len(command.Calls) > commandMaxCalls {
+			return codeInvalidCommand
+		}
+		seenCalls := make(map[string]struct{}, len(command.Calls))
+		for _, call := range command.Calls {
+			if !ValidPluginTarget(call.Plugin) || !ValidPluginMethod(call.Method) {
+				return codeInvalidCommand
+			}
+			key := call.Plugin + "\x00" + call.Method
+			if _, duplicate := seenCalls[key]; duplicate {
+				return codeInvalidCommand
+			}
+			seenCalls[key] = struct{}{}
 		}
 		if _, duplicate := seen[command.Name]; duplicate {
 			return codeDuplicateCommand
@@ -96,19 +113,37 @@ func asciiAlpha(character byte) bool {
 	return character >= 'A' && character <= 'Z' || character >= 'a' && character <= 'z'
 }
 
-func ValidTenantSite(value string) bool {
-	parts := strings.Split(value, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+func ValidPluginTarget(value string) bool {
+	if len(value) == 0 || len(value) > 128 {
 		return false
 	}
-	for _, part := range parts {
-		for index := 0; index < len(part); index++ {
-			character := part[index]
-			if character >= 'A' && character <= 'Z' || character >= 'a' && character <= 'z' || character >= '0' && character <= '9' || character == '_' || character == '-' {
-				continue
-			}
-			return false
+	for index := 0; index < len(value); index++ {
+		character := value[index]
+		if character >= 'A' && character <= 'Z' || character >= 'a' && character <= 'z' || character >= '0' && character <= '9' || character == '_' || character == '.' || character == '-' {
+			continue
 		}
+		return false
+	}
+	return true
+}
+
+func ValidPluginMethod(value string) bool {
+	if len(value) < 3 || len(value) > 128 {
+		return false
+	}
+	dot := strings.IndexByte(value, '.')
+	if dot < 1 || dot == len(value)-1 || strings.IndexByte(value[dot+1:], '.') >= 0 {
+		return false
+	}
+	if !ValidIdentifier(value[:dot]) || !ValidIdentifier(value[dot+1:]) {
+		return false
+	}
+	for index := 0; index < len(value); index++ {
+		character := value[index]
+		if character == '.' || character == '_' || character >= 'a' && character <= 'z' || character >= 'A' && character <= 'Z' || character >= '0' && character <= '9' {
+			continue
+		}
+		return false
 	}
 	return true
 }

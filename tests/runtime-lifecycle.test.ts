@@ -25,6 +25,7 @@ describe('Runtime Plugin SDK Reload integration', () => {
       afterValid: { generation: 'runtime-generation-3', pendingGeneration: '', ready: true },
       artifacts: { accepted: 2, status: 202 },
       moduleCatalog: { status: 200, count: 2 },
+      leaseFailure: { processExited: true, deregistered: true },
     });
   }, 120_000);
 });

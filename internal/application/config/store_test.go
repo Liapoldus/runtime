@@ -16,20 +16,22 @@ func TestActivationPreservesExactBytesAndSnapshotIsolation(t *testing.T) {
 	ctx := t.Context()
 	store := &config.ConfigurationStore{}
 	module := []byte("immutable module")
+	otherModule := []byte("second immutable module")
 	digest := func(raw []byte) string { sum := sha256.Sum256(raw); return hex.EncodeToString(sum[:]) }
-	settings := models.Configuration{SchemaVersion: "1", GroupID: "initial", ModelInstanceID: "domain", Module: models.Module{SHA256: digest(module)}, Commands: []models.Command{{Name: "submit", Export: "invoke", TenantSites: []string{"tenant/site"}, Entities: []string{"entries"}}}}
+	settings := models.Configuration{SchemaVersion: "2", Modules: []models.Module{{ID: "forms", SHA256: digest(module)}, {ID: "notify", SHA256: digest(otherModule)}}, Commands: []models.Command{
+		{Name: "submit", ModuleID: "forms", Export: "invoke", Entities: []string{"entries"}},
+		{Name: "send", ModuleID: "notify", Export: "invoke", Entities: []string{"users"}},
+	}}
 	initial, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Activate(ctx, "generation-1", "1", digest(initial), initial, module); err != nil {
+	modules := map[string][]byte{"forms": module, "notify": otherModule}
+	if err := store.Activate(ctx, "generation-1", "2", digest(initial), initial, modules); err != nil {
 		t.Fatal(err)
 	}
-	before, ok := store.Snapshot()
-	if !ok {
-		t.Fatal("missing active snapshot")
-	}
-	settings.GroupID = "candidate"
+	before := captureCommandViews(t, store, "submit", "send")
+	settings.Commands[0].Export = "candidate"
 	candidate, err := json.Marshal(settings)
 	if err != nil {
 		t.Fatal(err)
@@ -40,31 +42,64 @@ func TestActivationPreservesExactBytesAndSnapshotIsolation(t *testing.T) {
 		name         string
 		ctx          context.Context
 		version, sha string
-		raw, module  []byte
+		raw          []byte
+		modules      map[string][]byte
 	}{
-		{"digest mismatch", ctx, "1", digest(initial), candidate, module},
-		{"version mismatch", ctx, "2", digest(candidate), candidate, module},
-		{"module mismatch", ctx, "1", digest(candidate), candidate, []byte("other")},
-		{"cancelled", cancelled, "1", digest(candidate), candidate, module},
-		{"malformed", ctx, "1", digest([]byte("{")), []byte("{"), module},
+		{"digest mismatch", ctx, "2", digest(initial), candidate, modules},
+		{"version mismatch", ctx, "1", digest(candidate), candidate, modules},
+		{"module mismatch", ctx, "2", digest(candidate), candidate, map[string][]byte{"forms": []byte("wrong"), "notify": otherModule}},
+		{"missing module", ctx, "2", digest(candidate), candidate, map[string][]byte{"forms": module}},
+		{"cancelled", cancelled, "2", digest(candidate), candidate, modules},
+		{"malformed", ctx, "2", digest([]byte("{")), []byte("{"), modules},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := store.Activate(tc.ctx, "generation-2", tc.version, tc.sha, tc.raw, tc.module); !errors.Is(err, config.ErrConfigurationRejected) {
+			if err := store.Activate(tc.ctx, "generation-2", tc.version, tc.sha, tc.raw, tc.modules); !errors.Is(err, config.ErrConfigurationRejected) {
 				t.Fatal("candidate was not rejected")
 			}
-			after, ok := store.Snapshot()
-			if !ok || !reflect.DeepEqual(before, after) {
+			after := captureCommandViews(t, store, "submit", "send")
+			if !reflect.DeepEqual(before, after) {
 				t.Fatal("rejected candidate replaced active pair")
 			}
 		})
 	}
 	module[0] = 'X'
-	snapshot, _ := store.Snapshot()
-	snapshot.Module[0] = 'Y'
-	snapshot.Settings.Commands[0].TenantSites[0] = "other/site"
-	snapshot.Settings.Commands[0].Entities[0] = "other"
-	after, ok := store.Snapshot()
-	if !ok || !reflect.DeepEqual(before, after) {
+	otherModule[0] = 'Z'
+	if _, err := store.WithCommand("submit", func(view config.CommandView) error {
+		view.Command.Entities[0] = "mutated"
+		view.Command.Calls = []models.PluginMethod{{Plugin: "domain", Method: "domain.get"}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	after := captureCommandViews(t, store, "submit", "send")
+	if !reflect.DeepEqual(before, after) {
 		t.Fatal("mutable caller data changed active pair")
 	}
+}
+
+type capturedCommandView struct {
+	Generation    string
+	SchemaVersion string
+	SHA256        string
+	Command       models.Command
+	Module        []byte
+}
+
+func captureCommandViews(t *testing.T, store *config.ConfigurationStore, names ...string) map[string]capturedCommandView {
+	t.Helper()
+	result := make(map[string]capturedCommandView, len(names))
+	for _, name := range names {
+		found, err := store.WithCommand(name, func(view config.CommandView) error {
+			view.Module = append([]byte(nil), view.Module...)
+			result[name] = capturedCommandView{
+				Generation: view.Generation, SchemaVersion: view.SchemaVersion, SHA256: view.SHA256,
+				Command: view.Command, Module: view.Module,
+			}
+			return nil
+		})
+		if err != nil || !found {
+			t.Fatalf("capture command %s: found=%v err=%v", name, found, err)
+		}
+	}
+	return result
 }

@@ -1,5 +1,7 @@
 package contracts
 
+const maxGenerationArtifactBytes = 128 << 20
+
 type WasmABI struct {
 	Version        int      `json:"version"`
 	InputFormat    string   `json:"inputFormat"`
@@ -16,11 +18,14 @@ type WasmABI struct {
 		Invoke   WasmFunctionSignature `json:"invoke"`
 	} `json:"signatures"`
 	Limits struct {
-		MaxInputBytes     int    `json:"maxInputBytes"`
-		MaxOutputBytes    int    `json:"maxOutputBytes"`
-		MaxModuleBytes    int    `json:"maxModuleBytes"`
-		MaxMemoryPages    uint32 `json:"maxMemoryPages"`
-		MaxDurationMillis int    `json:"maxDurationMillis"`
+		MaxInputBytes              int    `json:"maxInputBytes"`
+		MaxOutputBytes             int    `json:"maxOutputBytes"`
+		MaxModuleBytes             int    `json:"maxModuleBytes"`
+		MaxGenerationArtifactBytes int    `json:"maxGenerationArtifactBytes"`
+		MaxHostCallBytes           int    `json:"maxHostCallBytes"`
+		MaxHostCalls               int    `json:"maxHostCalls"`
+		MaxMemoryPages             uint32 `json:"maxMemoryPages"`
+		MaxDurationMillis          int    `json:"maxDurationMillis"`
 	} `json:"limits"`
 }
 
@@ -37,7 +42,7 @@ type PluginMetadata struct {
 
 // WasmABIDefinition returns a fresh, typed sandbox contract.
 func WasmABIDefinition() WasmABI {
-	result := WasmABI{Version: 1, InputFormat: "json", OutputFormat: "json", ResultEncoding: "i64:high32=length,low32=pointer", HostModules: []string{}}
+	result := WasmABI{Version: 2, InputFormat: "json", OutputFormat: "json", ResultEncoding: "i64:high32=length,low32=pointer", HostModules: []string{"liapoldus.plugin.v2"}}
 	result.Exports.Memory = "memory"
 	result.Exports.Allocate = "alloc"
 	result.Exports.Invoke = "invoke"
@@ -46,6 +51,9 @@ func WasmABIDefinition() WasmABI {
 	result.Limits.MaxInputBytes = 1048576
 	result.Limits.MaxOutputBytes = 1048576
 	result.Limits.MaxModuleBytes = 16777216
+	result.Limits.MaxGenerationArtifactBytes = maxGenerationArtifactBytes
+	result.Limits.MaxHostCallBytes = 262144
+	result.Limits.MaxHostCalls = 32
 	result.Limits.MaxMemoryPages = 1024
 	result.Limits.MaxDurationMillis = 5000
 	return result

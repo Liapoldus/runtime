@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "capability": "runtime.invoke",
   "semantics": "Один транспортный вызов выполняется ровно один раз. Результат, не полученный из-за транспортной ошибки или отмены, считается неизвестным и никогда не воспроизводится автоматически (replay отсутствует). Тело ответа несёт только код ошибки и никогда не раскрывает содержимое исполнения (трапов, payloads, инвариантов).",
   "errors": {
@@ -19,15 +19,15 @@
       "http": 403,
       "retryable": false
     },
-    "forbidden_scope": {
-      "http": 403,
-      "retryable": false
-    },
     "invalid_request": {
       "http": 422,
       "retryable": false
     },
     "not_ready": {
+      "http": 503,
+      "retryable": true
+    },
+    "overloaded": {
       "http": 503,
       "retryable": true
     },

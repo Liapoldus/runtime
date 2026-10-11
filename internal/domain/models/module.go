@@ -3,6 +3,7 @@ package models
 import "errors"
 
 type Module struct {
+	ID     string `json:"moduleId"`
 	SHA256 string `json:"sha256"`
 }
 

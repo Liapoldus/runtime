@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -18,16 +20,17 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Liapoldus/plugin-sdk/application"
-	"github.com/Liapoldus/plugin-sdk/domain/interfaces"
-	sdkmodels "github.com/Liapoldus/plugin-sdk/domain/models"
-	"github.com/Liapoldus/plugin-sdk/infrastructure"
-	"github.com/Liapoldus/plugin-sdk/presentation"
-	protocolpeer "github.com/Liapoldus/pluginprotocol/v2/presentation/peer"
+	"github.com/Liapoldus/plugin-sdk/v2/application"
+	"github.com/Liapoldus/plugin-sdk/v2/domain/interfaces"
+	sdkmodels "github.com/Liapoldus/plugin-sdk/v2/domain/models"
+	"github.com/Liapoldus/plugin-sdk/v2/infrastructure"
+	"github.com/Liapoldus/plugin-sdk/v2/presentation"
+	protocolpeer "github.com/Liapoldus/pluginprotocol/v3/presentation/peer"
 	"github.com/Liapoldus/runtime/contracts"
 	runtimeconfig "github.com/Liapoldus/runtime/internal/application/config"
 	runtimemodule "github.com/Liapoldus/runtime/internal/application/module"
 	"github.com/Liapoldus/runtime/internal/infrastructure/artifacts"
+	"github.com/Liapoldus/runtime/internal/infrastructure/peercaller"
 	"github.com/Liapoldus/runtime/internal/presentation/admin"
 	"github.com/Liapoldus/runtime/internal/presentation/peerplugin"
 )
@@ -44,6 +47,8 @@ type options struct {
 	coreServer    string
 	instanceID    string
 	replicaID     string
+	placementID   string
+	incarnationID string
 	corePeerCN    string
 	caFile        string
 	serverCert    string
@@ -59,7 +64,12 @@ type options struct {
 	peerCert      string
 	peerKey       string
 	peerCarrier   string
+	restAdvertise string
+	peerAdvertise string
 }
+
+// releaseVersion is replaced by release builds using -ldflags.
+var releaseVersion = "0.0.0-dev"
 
 func main() {
 	if err := run(os.Args[1:], os.Stdout, os.Stderr); err != nil {
@@ -174,7 +184,74 @@ func run(arguments []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return errInvalidBootstrap
 	}
-	runtimeInvoker := runtimemodule.NewInvoker(store)
+	peerCertificate, err := tls.LoadX509KeyPair(configuration.peerCert, configuration.peerKey)
+	if err != nil {
+		return errInvalidBootstrap
+	}
+	peerRootsPEM, err := os.ReadFile(configuration.peerCAFile)
+	if err != nil {
+		return errInvalidBootstrap
+	}
+	peerRoots := x509.NewCertPool()
+	if !peerRoots.AppendCertsFromPEM(peerRootsPEM) {
+		return errInvalidBootstrap
+	}
+	directoryContract, err := infrastructure.LoadPeerDirectoryPollContract()
+	if err != nil {
+		return errInvalidBootstrap
+	}
+	peerCertificatePEM, err := os.ReadFile(configuration.peerCert)
+	if err != nil {
+		return errInvalidBootstrap
+	}
+	defer clear(peerCertificatePEM)
+	peerKeyPEM, err := os.ReadFile(configuration.peerKey)
+	if err != nil {
+		return errInvalidBootstrap
+	}
+	defer clear(peerKeyPEM)
+	directoryCredentials, err := infrastructure.LoadCredentials(contract, infrastructure.CredentialsMaterial{
+		CAFile:                configuration.caFile,
+		ServerCertificateFile: configuration.serverCert,
+		ServerKeyFile:         configuration.serverKey,
+		ClientCertificatePEM:  peerCertificatePEM,
+		ClientKeyPEM:          peerKeyPEM,
+	})
+	if err != nil {
+		return infrastructure.ErrInvalidCredentials
+	}
+	directoryProvider, err := infrastructure.NewStaticCredentialsProvider(directoryCredentials)
+	if err != nil {
+		return infrastructure.ErrInvalidCredentials
+	}
+	defer directoryProvider.Zeroize()
+	directoryTransport, err := infrastructure.NewMutualTLSClient(contract, directoryProvider, infrastructure.MutualTLSClientConfig{
+		Peer: peer, ServerName: configuration.coreServer, Revocation: revocation,
+	})
+	if err != nil {
+		return infrastructure.ErrInvalidClientTLS
+	}
+	directoryIdentity := sdkmodels.PeerReplicaID{
+		InstanceID: configuration.instanceID, ReplicaID: configuration.replicaID,
+		IncarnationID: configuration.incarnationID, PlacementID: configuration.placementID,
+	}
+	replicaContract, err := infrastructure.LoadReplicaLifecycleContract()
+	if err != nil {
+		return errInvalidBootstrap
+	}
+	replicaClient, err := infrastructure.NewReplicaLifecycleClient(replicaContract, configuration.coreURL, directoryTransport, directoryIdentity)
+	if err != nil {
+		return errInvalidBootstrap
+	}
+	directoryClient, err := infrastructure.NewPeerDirectoryClient(directoryContract, configuration.coreURL, directoryTransport, directoryIdentity)
+	if err != nil {
+		return errInvalidBootstrap
+	}
+	outboundCaller, err := peercaller.New(directoryClient, directoryContract, directoryIdentity, configuration.peerIdentity, peerCertificate, peerRoots, logger)
+	if err != nil {
+		return errInvalidBootstrap
+	}
+	runtimeInvoker := runtimemodule.NewInvokerWithHostCaller(store, outboundCaller)
 	presentationContract, err := mapPresentationContract(contract)
 	if err != nil {
 		return errInvalidBootstrap
@@ -213,18 +290,6 @@ func run(arguments []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return errInvalidBootstrap
 	}
-	peerCertificate, err := tls.LoadX509KeyPair(configuration.peerCert, configuration.peerKey)
-	if err != nil {
-		return errInvalidBootstrap
-	}
-	peerRootsPEM, err := os.ReadFile(configuration.peerCAFile)
-	if err != nil {
-		return errInvalidBootstrap
-	}
-	peerRoots := x509.NewCertPool()
-	if !peerRoots.AppendCertsFromPEM(peerRootsPEM) {
-		return errInvalidBootstrap
-	}
 	peerServer, err := protocolpeer.Listen(protocolpeer.ServerConfig{
 		Network: protocolpeer.NetworkConfig{
 			Carrier: protocolpeer.Carrier(configuration.peerCarrier), Endpoint: configuration.peerListen,
@@ -246,14 +311,55 @@ func run(arguments []string, stdout, stderr io.Writer) error {
 	serveResult := make(chan error, 2)
 	go func() { serveResult <- server.Serve(listener) }()
 	go func() { serveResult <- peerServer.Sessions(serveContext) }()
+	releaseDigest, err := executableDigest()
+	if err != nil {
+		return errors.Join(errInvalidBootstrap, listener.Close(), peerServer.Close())
+	}
+	readiness := lifecycle.Readiness()
+	registration := sdkmodels.ReplicaRegistrationRequest{
+		ContractVersion: replicaContract.ContractVersion,
+		Identity:        directoryIdentity,
+		RestEndpoint:    configuration.restAdvertise,
+		PeerEndpoints: []sdkmodels.ReplicaPeerEndpoint{{
+			Carrier: sdkmodels.PeerCarrier(configuration.peerCarrier), Endpoint: configuration.peerAdvertise,
+			SecurityProfile: sdkmodels.PeerSecurityMTLS,
+		}},
+		Release:             sdkmodels.ReplicaRelease{Version: releaseVersion, SHA256: releaseDigest},
+		AdvertisedContracts: []sdkmodels.ContractVersion{},
+		AcceptedContracts:   []sdkmodels.ContractRange{},
+		AppliedGeneration:   readiness.Generation,
+		Ready:               readiness.Ready && readiness.Generation != "" && runtimeInvoker.Accepting(),
+	}
+	registerContext, registerCancel := context.WithTimeout(serveContext, time.Duration(replicaContract.Deadlines.RegisterSeconds)*time.Second)
+	_, err = replicaClient.Register(registerContext, registration)
+	registerCancel()
+	if err != nil {
+		stop()
+		shutdownContext, shutdownCancel := context.WithTimeout(context.Background(), time.Duration(contract.Deadlines.PluginShutdownGraceSeconds)*time.Second)
+		defer shutdownCancel()
+		return errors.Join(errInvalidBootstrap, server.GracefulShutdown(shutdownContext), peerServer.Close())
+	}
+	leaseResult := make(chan error, 1)
+	go func() {
+		leaseResult <- renewReplicaLease(serveContext, replicaClient, replicaContract, directoryIdentity, lifecycle, runtimeInvoker)
+	}()
 	if err := writeReady(stdout, listener.Addr().String(), peerServer.Addr()); err != nil {
 		return errors.Join(errInvalidBootstrap, listener.Close(), peerServer.Close())
 	}
+	var leaseErr error
+	var runtimeErr error
 	select {
 	case <-serveContext.Done():
 	case err := <-serveResult:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
-			return errInvalidBootstrap
+			runtimeErr = errInvalidBootstrap
+			stop()
+		}
+	case err := <-leaseResult:
+		if err != nil {
+			leaseErr = errInvalidBootstrap
+			runtimeInvoker.BeginDrain()
+			stop()
 		}
 	}
 	shutdownContext, cancel := context.WithTimeout(context.Background(), time.Duration(contract.Deadlines.PluginShutdownGraceSeconds)*time.Second)
@@ -264,9 +370,64 @@ func run(arguments []string, stdout, stderr io.Writer) error {
 	go func() { drainResults <- server.GracefulShutdown(shutdownContext) }()
 	go func() { drainResults <- runtimeInvoker.WaitForDrain(shutdownContext) }()
 	drainErr := errors.Join(<-drainResults, <-drainResults)
+	deregisterContext, deregisterCancel := context.WithTimeout(context.Background(), time.Duration(replicaContract.Deadlines.DeregisterSeconds)*time.Second)
+	_, deregisterErr := replicaClient.Deregister(deregisterContext, sdkmodels.ReplicaDeregistrationRequest{
+		ContractVersion: replicaContract.ContractVersion, Identity: directoryIdentity,
+	})
+	deregisterCancel()
 	client.CloseIdleConnections()
+	directoryTransport.CloseIdleConnections()
+	directoryProvider.Zeroize()
 	credentials.Zeroize()
-	return errors.Join(closeErr, drainErr)
+	return errors.Join(closeErr, drainErr, deregisterErr, leaseErr, runtimeErr)
+}
+
+func renewReplicaLease(ctx context.Context, client *infrastructure.ReplicaLifecycleClient, contract infrastructure.ReplicaLifecycleContract,
+	identity sdkmodels.PeerReplicaID, lifecycle *application.Lifecycle, invoker *runtimemodule.Invoker) error {
+	ticker := time.NewTicker(time.Duration(contract.Lease.RenewIntervalSeconds) * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			readiness := lifecycle.Readiness()
+			ready := readiness.Ready && readiness.Generation != "" && invoker.Accepting()
+			request := sdkmodels.ReplicaRenewalRequest{
+				ContractVersion: contract.ContractVersion, Identity: identity,
+				AppliedGeneration: readiness.Generation, Ready: ready,
+			}
+			renewContext, cancel := context.WithTimeout(ctx, time.Duration(contract.Deadlines.RenewSeconds)*time.Second)
+			_, err := client.Renew(renewContext, request)
+			cancel()
+			if err != nil {
+				// A failed renewal is never replayed; the supervisor must issue a new incarnation.
+				return errInvalidBootstrap
+			}
+		}
+	}
+}
+
+func executableDigest() (resultDigest string, resultErr error) {
+	path, err := os.Executable()
+	if err != nil {
+		return "", errInvalidBootstrap
+	}
+	// #nosec G304 -- os.Executable supplies the path of this running process.
+	file, err := os.Open(path)
+	if err != nil {
+		return "", errInvalidBootstrap
+	}
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			resultErr = errors.Join(resultErr, errInvalidBootstrap)
+		}
+	}()
+	digest := sha256.New()
+	if _, err := io.Copy(digest, file); err != nil {
+		return "", errInvalidBootstrap
+	}
+	return hex.EncodeToString(digest.Sum(nil)), nil
 }
 
 func parseOptions(arguments []string) (options, error) {
@@ -278,6 +439,8 @@ func parseOptions(arguments []string) (options, error) {
 	flags.StringVar(&result.coreServer, "core-server-name", "", "Core TLS server name")
 	flags.StringVar(&result.instanceID, "instance-id", "", "registered Runtime instance identity")
 	flags.StringVar(&result.replicaID, "replica-id", "", "registered Runtime replica identity")
+	flags.StringVar(&result.placementID, "placement-id", "", "registered Runtime placement identity")
+	flags.StringVar(&result.incarnationID, "incarnation-id", "", "current Runtime process incarnation identity")
 	flags.StringVar(&result.corePeerCN, "core-peer-cn", "", "pinned Core certificate common name")
 	flags.StringVar(&result.caFile, "tls-ca-file", "", "operator trust roots PEM file")
 	flags.StringVar(&result.serverCert, "tls-server-cert-file", "", "Runtime HTTPS certificate PEM file")
@@ -293,13 +456,16 @@ func parseOptions(arguments []string) (options, error) {
 	flags.StringVar(&result.peerCert, "peer-cert", "", "Peer certificate PEM file")
 	flags.StringVar(&result.peerKey, "peer-key", "", "Peer private key PEM file")
 	flags.StringVar(&result.peerCarrier, "peer-carrier", "tcp", "Peer carrier tcp or quic")
+	flags.StringVar(&result.restAdvertise, "rest-advertise-url", "", "Core-visible HTTPS endpoint for this Runtime replica")
+	flags.StringVar(&result.peerAdvertise, "peer-advertise-endpoint", "", "Core-visible peer carrier host:port for this Runtime replica")
 	if err := flags.Parse(arguments); err != nil || flags.NArg() != 0 ||
 		result.listenAddress == "" || result.coreURL == "" || result.coreServer == "" ||
-		result.instanceID == "" || result.replicaID == "" || result.corePeerCN == "" ||
+		result.instanceID == "" || result.replicaID == "" || result.placementID == "" || result.incarnationID == "" || result.corePeerCN == "" ||
 		result.caFile == "" || result.serverCert == "" || result.serverKey == "" ||
 		result.clientCert == "" || result.clientKey == "" || result.crlFile == "" || !filepath.IsAbs(result.artifactDir) ||
 		result.peerListen == "" || result.peerIdentity == "" || result.peerCaller == "" ||
 		result.peerCAFile == "" || result.peerCert == "" || result.peerKey == "" ||
+		result.restAdvertise == "" || result.peerAdvertise == "" ||
 		(result.peerCarrier != "tcp" && result.peerCarrier != "quic") {
 		return options{}, errInvalidBootstrap
 	}
@@ -418,12 +584,30 @@ func (applier configurationApplier) Apply(ctx context.Context, configuration sdk
 	if code != "" {
 		return runtimeconfig.ErrConfigurationRejected
 	}
-	module, err := applier.modules.Get(ctx, settings.Module.SHA256)
-	if err != nil {
-		return err
+	modules := make(map[string][]byte, len(settings.Modules))
+	exportsByModule := make(map[string][]string, len(settings.Modules))
+	for _, command := range settings.Commands {
+		exportsByModule[command.ModuleID] = append(exportsByModule[command.ModuleID], command.Export)
 	}
-	defer clear(module)
-	return applier.store.Activate(ctx, configuration.Generation, configuration.SchemaVersion, configuration.SHA256, configuration.Bytes(), module)
+	var loadedBytes int64
+	defer func() {
+		for _, module := range modules {
+			clear(module)
+		}
+	}()
+	for _, declaration := range settings.Modules {
+		module, err := applier.modules.GetWithExports(ctx, declaration.SHA256, exportsByModule[declaration.ID])
+		if err != nil {
+			return err
+		}
+		loadedBytes += int64(len(module))
+		if loadedBytes > int64(contracts.WasmABIDefinition().Limits.MaxGenerationArtifactBytes) {
+			clear(module)
+			return runtimeconfig.ErrConfigurationRejected
+		}
+		modules[declaration.ID] = module
+	}
+	return applier.store.Activate(ctx, configuration.Generation, configuration.SchemaVersion, configuration.SHA256, configuration.Bytes(), modules)
 }
 
 type registrationProvider struct{ lifecycle *application.Lifecycle }

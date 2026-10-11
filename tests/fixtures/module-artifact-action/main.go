@@ -8,8 +8,8 @@ import (
 	"io"
 	"os"
 
-	sdkmodels "github.com/Liapoldus/plugin-sdk/domain/models"
-	sdkpresentation "github.com/Liapoldus/plugin-sdk/presentation"
+	sdkmodels "github.com/Liapoldus/plugin-sdk/v2/domain/models"
+	sdkpresentation "github.com/Liapoldus/plugin-sdk/v2/presentation"
 	"github.com/Liapoldus/runtime/contracts"
 	runtimemodule "github.com/Liapoldus/runtime/internal/application/module"
 	"github.com/Liapoldus/runtime/internal/infrastructure/artifacts"

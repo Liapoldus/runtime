@@ -7,19 +7,29 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"testing"
 )
 
 func readContract(t *testing.T, name string, target any) {
 	t.Helper()
 	//nolint:gosec // G304: reads known contract filenames in the repository artifact directory.
-	raw, err := os.ReadFile(filepath.Join("v1", name))
+	raw, err := os.ReadFile(filepath.Join("v2", name))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := json.Unmarshal(raw, target); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func schemaObject(t *testing.T, parent map[string]any, key string) map[string]any {
+	t.Helper()
+	value, ok := parent[key].(map[string]any)
+	if !ok {
+		t.Fatalf("schema node %q is missing or not an object", key)
+	}
+	return value
 }
 
 func TestInvokeDefinitionsMatchPublishedDocument(t *testing.T) {
@@ -93,7 +103,7 @@ func TestGeneratedMetadataAndABI(t *testing.T) {
 		"plugin.json": metadata.Manifest, "settings.schema.json": metadata.ConfigurationSchema, "admin-surface.json": metadata.AdminSurface,
 	} {
 		//nolint:gosec // G304: reads known contract filenames in the repository artifact directory.
-		published, err := os.ReadFile(filepath.Join("v1", name))
+		published, err := os.ReadFile(filepath.Join("v2", name))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -109,8 +119,64 @@ func TestGeneratedMetadataAndABI(t *testing.T) {
 	}
 }
 
+func TestVersionedRuntimeSchemasCarryV2Titles(t *testing.T) {
+	for name, expected := range map[string]string{
+		"invoke-success.schema.json":           "Runtime v2 invoke success body",
+		"module-artifact-metadata.schema.json": "Runtime module upload metadata v2",
+		"module-artifact-receipt.schema.json":  "Runtime module upload receipt v2",
+	} {
+		t.Run(name, func(t *testing.T) {
+			var document map[string]any
+			readContract(t, name, &document)
+			if document["title"] != expected {
+				t.Fatalf("schema title = %v, want %q", document["title"], expected)
+			}
+		})
+	}
+}
+
+func TestSettingsSchemaAllowsGenericPluginProtocolMethods(t *testing.T) {
+	raw, err := contracts.Document("settings.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	properties := schemaObject(t, document, "properties")
+	commands := schemaObject(t, properties, "commands")
+	commandItems := schemaObject(t, commands, "items")
+	commandProperties := schemaObject(t, commandItems, "properties")
+	calls := schemaObject(t, commandProperties, "calls")
+	callItems := schemaObject(t, calls, "items")
+	callProperties := schemaObject(t, callItems, "properties")
+	method := schemaObject(t, callProperties, "method")
+	pattern, ok := method["pattern"].(string)
+	if !ok {
+		t.Fatal("plugin method schema has no pattern")
+	}
+	if method["maxLength"] != float64(128) {
+		t.Fatalf("plugin method schema maxLength = %v, want 128", method["maxLength"])
+	}
+	compiled, err := regexp.Compile(pattern)
+	if err != nil {
+		t.Fatalf("plugin method schema pattern is invalid: %v", err)
+	}
+	for _, value := range []string{"domain.transaction", "metrics.aggregate"} {
+		if !compiled.MatchString(value) {
+			t.Errorf("settings schema rejects generic plugin method %q", value)
+		}
+	}
+	for _, value := range []string{"metrics.aggregate.v2", "metrics.aggregate-now"} {
+		if compiled.MatchString(value) {
+			t.Errorf("settings schema accepts unsupported plugin method %q", value)
+		}
+	}
+}
+
 func TestArtifactSetIsReproducible(t *testing.T) {
-	entries, err := os.ReadDir("v1")
+	entries, err := os.ReadDir("v2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +185,7 @@ func TestArtifactSetIsReproducible(t *testing.T) {
 	}
 	for _, entry := range entries {
 		t.Run(entry.Name(), func(t *testing.T) {
-			want, err := os.ReadFile(filepath.Join("v1", entry.Name()))
+			want, err := os.ReadFile(filepath.Join("v2", entry.Name()))
 			if err != nil {
 				t.Fatal(err)
 			}

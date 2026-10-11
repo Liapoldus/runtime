@@ -68,8 +68,8 @@ func Documents() map[string]any {
 			},
 			"artifactFilenameForwarded": false,
 		},
-		"receiptSchema":  "contracts/v1/module-artifact-receipt.schema.json",
-		"metadataSchema": "contracts/v1/module-artifact-metadata.schema.json",
+		"receiptSchema":  "contracts/v2/module-artifact-receipt.schema.json",
+		"metadataSchema": "contracts/v2/module-artifact-metadata.schema.json",
 		"idempotency": map[string]any{
 			"required": true,
 			"scope": []any{
@@ -161,15 +161,15 @@ func Documents() map[string]any {
 		"plugin.json": map[string]any{
 			"name": "runtime",
 			"configuration": map[string]any{
-				"schemaVersion": "1",
-				"schema":        "contracts/v1/settings.schema.json",
+				"schemaVersion": "2",
+				"schema":        "contracts/v2/settings.schema.json",
 			},
 			"adminSurface": map[string]any{
 				"version":       1,
-				"descriptor":    "contracts/v1/admin-surface.json",
-				"schema":        "contracts/v1/admin-surface.schema.json",
-				"actions":       "contracts/v1/admin-actions.json",
-				"actionsSchema": "contracts/v1/admin-actions.schema.json",
+				"descriptor":    "contracts/v2/admin-surface.json",
+				"schema":        "contracts/v2/admin-surface.schema.json",
+				"actions":       "contracts/v2/admin-actions.json",
+				"actionsSchema": "contracts/v2/admin-actions.schema.json",
 			},
 			"capabilities": []any{
 				map[string]any{
@@ -180,7 +180,7 @@ func Documents() map[string]any {
 		},
 		"invoke-success.schema.json": schema.Success(),
 		"wasm-errors.json": map[string]any{
-			"version": 1,
+			"version": 2,
 			"errors": map[string]any{
 				"execution_failed": map[string]any{
 					"code":                "execution_failed",

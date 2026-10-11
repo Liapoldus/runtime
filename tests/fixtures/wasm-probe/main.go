@@ -28,7 +28,7 @@ func main() {
 	if request.CancelAfterMillis > 0 {
 		time.AfterFunc(time.Duration(request.CancelAfterMillis)*time.Millisecond, cancel)
 	}
-	output, err := (wasm.Executor{}).Execute(ctx, request.WASM, request.Input)
+	output, err := (wasm.Executor{}).ExecuteWithHostExport(ctx, request.WASM, "invoke", request.Input, nil)
 	response := struct {
 		Output json.RawMessage `json:"output,omitempty"`
 		Error  string          `json:"error,omitempty"`

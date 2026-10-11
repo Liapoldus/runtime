@@ -138,10 +138,10 @@ func Actions() map[string]any {
 						"const": 202,
 					},
 					"receiptSchema": map[string]any{
-						"const": "contracts/v1/module-artifact-receipt.schema.json",
+						"const": "contracts/v2/module-artifact-receipt.schema.json",
 					},
 					"metadataSchema": map[string]any{
-						"const": "contracts/v1/module-artifact-metadata.schema.json",
+						"const": "contracts/v2/module-artifact-metadata.schema.json",
 					},
 					"archiveLimits": map[string]any{
 						"type":                 "object",

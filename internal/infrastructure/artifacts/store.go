@@ -98,6 +98,16 @@ func (store Store) Put(ctx context.Context, expected string, source io.Reader) (
 // still match the requested content digest. It is bounded by the published ABI
 // limit even if the artifact directory was modified outside Store.Put.
 func (store Store) Get(ctx context.Context, expected string) (resultBytes []byte, resultErr error) {
+	return store.get(ctx, expected, nil)
+}
+
+// GetWithExports verifies that every configured command route exists and has
+// the Runtime invocation signature before returning the immutable bytes.
+func (store Store) GetWithExports(ctx context.Context, expected string, exports []string) ([]byte, error) {
+	return store.get(ctx, expected, exports)
+}
+
+func (store Store) get(ctx context.Context, expected string, exports []string) (resultBytes []byte, resultErr error) {
 	abi := contracts.WasmABIDefinition()
 	if !validDigest(expected) || store.Root == "" || ctx == nil || ctx.Err() != nil {
 		return nil, models.ErrInvalidArtifactDigest
@@ -128,7 +138,13 @@ func (store Store) Get(ctx context.Context, expected string) (resultBytes []byte
 		clear(module)
 		return nil, models.ErrArtifactDigestMismatch
 	}
-	if err := wasm.ValidateModule(ctx, module); err != nil {
+	var validationErr error
+	if len(exports) == 0 {
+		validationErr = wasm.ValidateModule(ctx, module)
+	} else {
+		validationErr = wasm.ValidateModuleExports(ctx, module, exports)
+	}
+	if validationErr != nil {
 		clear(module)
 		return nil, models.ErrInvalidArtifactModule
 	}

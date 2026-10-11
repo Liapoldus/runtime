@@ -1,9 +1,11 @@
 package wasm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"time"
 
 	"github.com/Liapoldus/runtime/contracts"
@@ -25,9 +27,36 @@ var (
 // filesystem, network or another plugin through this adapter.
 type Executor struct{}
 
+type HostCall func(context.Context, string, string, json.RawMessage) (json.RawMessage, error)
+
+type hostRequest struct {
+	Plugin  string          `json:"plugin"`
+	Method  string          `json:"method"`
+	Payload json.RawMessage `json:"payload"`
+}
+
+type hostResponse struct {
+	OK      bool            `json:"ok"`
+	Payload json.RawMessage `json:"payload,omitempty"`
+	Error   string          `json:"error,omitempty"`
+}
+
 // ValidateModule compiles one bounded WASM module and verifies the exact
 // product ABI without instantiating it or executing its start function.
 func ValidateModule(ctx context.Context, moduleBytes []byte) (resultErr error) {
+	return validateModule(ctx, moduleBytes, nil)
+}
+
+// ValidateModuleExports also verifies every configured route export has the
+// same function signature as the ABI invocation entrypoint.
+func ValidateModuleExports(ctx context.Context, moduleBytes []byte, exports []string) error {
+	if len(exports) == 0 {
+		return ErrInvalidABI
+	}
+	return validateModule(ctx, moduleBytes, exports)
+}
+
+func validateModule(ctx context.Context, moduleBytes []byte, routeExports []string) (resultErr error) {
 	if ctx == nil {
 		return ErrInvalidModule
 	}
@@ -54,14 +83,25 @@ func ValidateModule(ctx context.Context, moduleBytes []byte) (resultErr error) {
 	if err := ValidateCompiledModule(compiled); err != nil {
 		return err
 	}
+	functions := compiled.ExportedFunctions()
+	for _, name := range routeExports {
+		function, ok := functions[name]
+		if !ok || !hasSignature(function, abi.Signatures.Invoke) {
+			return ErrInvalidABI
+		}
+	}
 	return executionError(ctx)
 }
 
-func (Executor) Execute(ctx context.Context, moduleBytes, input []byte) (resultBytes []byte, resultErr error) {
+// ExecuteWithHostExport invokes one configured ABI-compatible function export.
+func (Executor) ExecuteWithHostExport(ctx context.Context, moduleBytes []byte, exportName string, input []byte, hostCall HostCall) (resultBytes []byte, resultErr error) {
 	if err := executionError(ctx); err != nil {
 		return nil, err
 	}
 	abi := contracts.WasmABIDefinition()
+	if !validExportName(exportName) {
+		return nil, ErrInvalidABI
+	}
 	if len(input) > abi.Limits.MaxInputBytes || len(moduleBytes) > abi.Limits.MaxModuleBytes {
 		return nil, ErrTooLarge
 	}
@@ -86,6 +126,58 @@ func (Executor) Execute(ctx context.Context, moduleBytes, input []byte) (resultB
 	if err := ValidateCompiledModule(compiled); err != nil {
 		return nil, err
 	}
+	configuredExport, exists := compiled.ExportedFunctions()[exportName]
+	if !exists || !hasSignature(configuredExport, abi.Signatures.Invoke) {
+		return nil, ErrInvalidABI
+	}
+	if len(compiled.ImportedFunctions()) > 0 {
+		if hostCall == nil {
+			return nil, ErrExecutionFailed
+		}
+		callCount := 0
+		abi := contracts.WasmABIDefinition()
+		_, err := runtime.NewHostModuleBuilder(abi.HostModules[0]).
+			NewFunctionBuilder().WithFunc(func(callCtx context.Context, guest api.Module, pointer, length uint32) uint64 {
+			if callCount >= abi.Limits.MaxHostCalls || int(length) > abi.Limits.MaxHostCallBytes {
+				return hostFailure(guest, callCtx, abi.Exports.Allocate, abi.Limits.MaxHostCallBytes)
+			}
+			callCount++
+			memory := guest.ExportedMemory(abi.Exports.Memory)
+			inputBytes, ok := memory.Read(pointer, length)
+			if !ok || len(inputBytes) > abi.Limits.MaxHostCallBytes {
+				return hostFailure(guest, callCtx, abi.Exports.Allocate, abi.Limits.MaxHostCallBytes)
+			}
+			var request hostRequest
+			decoder := json.NewDecoder(bytes.NewReader(append([]byte(nil), inputBytes...)))
+			decoder.DisallowUnknownFields()
+			decodeErr := decoder.Decode(&request)
+			var trailing any
+			if decodeErr != nil || decoder.Decode(&trailing) != io.EOF || request.Plugin == "" || request.Method == "" || len(request.Payload) == 0 || !json.Valid(request.Payload) {
+				return hostFailure(guest, callCtx, abi.Exports.Allocate, abi.Limits.MaxHostCallBytes)
+			}
+			response := hostResponse{}
+			payload, callErr := hostCall(callCtx, request.Plugin, request.Method, append(json.RawMessage(nil), request.Payload...))
+			if callErr != nil {
+				response.Error = "call_failed"
+			} else if len(payload) > abi.Limits.MaxHostCallBytes || !json.Valid(payload) {
+				response.Error = "invalid_response"
+			} else {
+				response.OK = true
+				response.Payload = append(json.RawMessage(nil), payload...)
+			}
+			encoded, marshalErr := json.Marshal(response)
+			if marshalErr != nil || len(encoded) > abi.Limits.MaxHostCallBytes {
+				return hostFailure(guest, callCtx, abi.Exports.Allocate, abi.Limits.MaxHostCallBytes)
+			}
+			return writeGuestBytes(callCtx, guest, abi.Exports.Allocate, encoded)
+		}).Export("call").Instantiate(ctx)
+		if err != nil {
+			if interrupted := executionError(ctx); interrupted != nil {
+				return nil, interrupted
+			}
+			return nil, ErrInvalidABI
+		}
+	}
 	instance, err := runtime.InstantiateModule(ctx, compiled, wazero.NewModuleConfig())
 	if err != nil {
 		if interrupted := executionError(ctx); interrupted != nil {
@@ -95,7 +187,7 @@ func (Executor) Execute(ctx context.Context, moduleBytes, input []byte) (resultB
 	}
 	defer func() { resultErr = errors.Join(resultErr, instance.Close(ctx)) }()
 	allocate := instance.ExportedFunction(abi.Exports.Allocate)
-	invoke := instance.ExportedFunction(abi.Exports.Invoke)
+	invoke := instance.ExportedFunction(exportName)
 	memory := instance.ExportedMemory(abi.Exports.Memory)
 	allocated, err := allocate.Call(ctx, uint64(len(input)))
 	if err != nil {
@@ -139,6 +231,24 @@ func (Executor) Execute(ctx context.Context, moduleBytes, input []byte) (resultB
 	return append([]byte(nil), output...), nil
 }
 
+func validExportName(value string) bool {
+	if value == "" || len(value) > 64 || !asciiAlpha(value[0]) {
+		return false
+	}
+	for index := 1; index < len(value); index++ {
+		character := value[index]
+		if asciiAlpha(character) || character >= '0' && character <= '9' || character == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func asciiAlpha(character byte) bool {
+	return character >= 'A' && character <= 'Z' || character >= 'a' && character <= 'z'
+}
+
 // ValidateCompiledModule verifies the module shape declared by the Runtime ABI
 // without instantiating or executing untrusted start functions. Runtime modules
 // may not import host functions or memory, and their exported functions must
@@ -148,8 +258,15 @@ func ValidateCompiledModule(compiled wazero.CompiledModule) error {
 		return ErrInvalidABI
 	}
 	abi := contracts.WasmABIDefinition()
-	if len(compiled.ImportedFunctions()) != 0 || len(compiled.ImportedMemories()) != 0 {
+	if len(compiled.ImportedFunctions()) > 1 || len(compiled.ImportedMemories()) != 0 {
 		return ErrInvalidABI
+	}
+	if imported := compiled.ImportedFunctions(); len(imported) == 1 {
+		moduleName, name, ok := imported[0].Import()
+		abi := contracts.WasmABIDefinition()
+		if !ok || moduleName != abi.HostModules[0] || name != "call" || !hasSignature(imported[0], contracts.WasmFunctionSignature{Parameters: []string{"i32", "i32"}, Results: []string{"i64"}}) {
+			return ErrInvalidABI
+		}
 	}
 	functions := compiled.ExportedFunctions()
 	allocate, ok := functions[abi.Exports.Allocate]
@@ -168,6 +285,29 @@ func ValidateCompiledModule(compiled wazero.CompiledModule) error {
 		return ErrInvalidABI
 	}
 	return nil
+}
+
+func writeGuestBytes(ctx context.Context, guest api.Module, allocateName string, data []byte) uint64 {
+	if uint64(len(data)) > uint64(^uint32(0)) {
+		return 0
+	}
+	allocated, err := guest.ExportedFunction(allocateName).Call(ctx, uint64(len(data)))
+	if err != nil || len(allocated) != 1 || allocated[0] > uint64(^uint32(0)) {
+		return 0
+	}
+	pointer := uint32(allocated[0] & 0xffffffff)
+	if !guest.ExportedMemory("memory").Write(pointer, data) {
+		return 0
+	}
+	return allocated[0] | uint64(len(data))<<32
+}
+
+func hostFailure(guest api.Module, ctx context.Context, allocateName string, maxBytes int) uint64 {
+	data := []byte(`{"ok":false,"error":"host_call_rejected"}`)
+	if len(data) > maxBytes {
+		return 0
+	}
+	return writeGuestBytes(ctx, guest, allocateName, data)
 }
 
 func hasSignature(function api.FunctionDefinition, signature contracts.WasmFunctionSignature) bool {

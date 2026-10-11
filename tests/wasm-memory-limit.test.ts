@@ -1,5 +1,5 @@
-import abi from '../contracts/v1/wasm-abi.json';
-import errors from '../contracts/v1/wasm-errors.json';
+import abi from '../contracts/v2/wasm-abi.json';
+import errors from '../contracts/v2/wasm-errors.json';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
@@ -9,12 +9,12 @@ import { describe, expect, it } from 'vitest';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 describe('WASM hard memory boundary', () => {
-  it('declares the existing bounded execution error in the v1 owner contract', () => {
+  it('declares the bounded execution error in the v2 owner contract', () => {
 
 
 
     expect(abi.limits.maxMemoryPages).toBe(1024);
-    expect(errors.version).toBe(1);
+    expect(errors.version).toBe(2);
     expect(errors.errors.execution_failed.code).toBe('execution_failed');
     expect(errors.errors.execution_failed.maximumMessageBytes).toBe(0);
   });

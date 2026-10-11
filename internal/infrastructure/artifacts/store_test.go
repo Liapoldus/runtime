@@ -97,3 +97,27 @@ func TestCatalogRejectsTamperedArtifact(t *testing.T) {
 		t.Fatal("tampered artifact listed")
 	}
 }
+
+func TestGetWithExportsRejectsMissingOrIncompatibleRoute(t *testing.T) {
+	module, err := hex.DecodeString("0061736d01000000010c0260017f017f60027f7f017e03030200010503010001071b03066d656d6f7279020005616c6c6f63000006696e766f6b6500010a1302040041000b0c002001ad4220862000ad840b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(module)
+	digest := hex.EncodeToString(sum[:])
+	store := artifacts.Store{Root: t.TempDir()}
+	if err := store.Put(t.Context(), digest, bytes.NewReader(module)); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.GetWithExports(t.Context(), digest, []string{"invoke"})
+	if err != nil || !bytes.Equal(loaded, module) {
+		t.Fatalf("configured invoke export rejected: err=%v", err)
+	}
+	clear(loaded)
+	if _, err := store.GetWithExports(t.Context(), digest, []string{"missing"}); !errors.Is(err, models.ErrInvalidArtifactModule) {
+		t.Fatalf("missing command export accepted: %v", err)
+	}
+	if _, err := store.GetWithExports(t.Context(), digest, []string{"alloc"}); !errors.Is(err, models.ErrInvalidArtifactModule) {
+		t.Fatalf("wrong-signature command export accepted: %v", err)
+	}
+}

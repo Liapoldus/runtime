@@ -1,128 +1,53 @@
-# Runtime — целевой плагин v2
+# Runtime v2 — целевая архитектура
 
-Платформенный milestone v2 добавляет Plugin SDK self-registration/lease для
-каждой replica Runtime-группы, SemVer/digest и диапазоны совместимости WASM ABI,
-artifact format, settings и peer contracts. Число replicas определяет
-оператор, не Core. Две rollout-когорты допускаются только при совместимости
-и подтверждённых traffic weights; неизвестный результат команды не replay-ится.
+Runtime — отдельный plugin, который исполняет объявленные команды из нескольких изолированных WASM-модулей и по ограниченному host ABI вызывает разрешённые методы других plugins. Число Runtime replicas и процессы принадлежат оператору; Core координирует их конфигурационные поколения и readiness, но не запускает workloads.
 
-Runtime — отдельный плагин исполнения объявленных WASM-команд. Core хранит
-точные байты JSON-конфигурации, вызывает Plugin SDK REST `Reload`; экземпляр
-Runtime сам получает точные bytes поколения, сверяет SHA-256 документа и
-schema version, валидирует его и атомарно активирует настройки в памяти.
-[Нормативная схема настроек](https://github.com/Liapoldus/runtime/blob/main/contracts/v1/settings.schema.json)
-принадлежит этому репозиторию.
+Код и generated contracts перешли на settings/ABI v2: несколько module artifacts, command routes и один строгий host import реализованы. Есть directory/dial adapter: каждый внешний вызов требует Core peer link, выбирает допустимую replica и pin’ит её mTLS identity. Runtime регистрирует replica по SDK lifecycle contract до объявления процесса готовым, продлевает lease с текущими applied generation/readiness и deregister-ится при штатной остановке. Bootstrap требует явные REST и peer advertised endpoints; отказ registration блокирует старт, ошибка renewal завершает процесс для fencing и выдачи новой incarnation supervisor-ом. Загрузка artifact использует SDK streaming action, а active generation ограничена суммой 128 MiB WASM bytes. Устаревшие single-module, delegated-scope/OwnerGroup и no-host-call пути удалены. Настоящий Core→SDK→Runtime→Domain child-process acceptance проверяет exact settings generation, directory eligibility, WASM host call, deny/allow по Runtime mTLS grant, entity/method narrowing, отзыв Core peer link и отказ Core активировать семантически неверный command route. При отказе старое поколение остаётся активным, но SDK сообщает `pendingGeneration` и снимает Runtime с readiness; следующее валидное Core-поколение восстанавливает route. Сценарий также перезапускает оба plugin под новыми Core incarnations, проверяет повторное применение Runtime generation и восстановление host call. Сквозной shutdown case подтверждает, что запись от admitted WASM host call видна в Domain до SIGTERM, Runtime отклоняет новые вызовы, завершает уже принятый вызов и затем deregister-ится в Core. Отдельный Runtime child-process тест с mock Core и plugin подтверждает распространение отмены от `runtime.invoke` до удалённого handler по mTLS `pluginprotocol` и единственную доставку вызова. Hosted OS qualification, hosted CI и полное lease-fencing acceptance остаются открытыми; production readiness не заявляется. Актуальные gates — в [TODO владельца](https://github.com/Liapoldus/runtime/blob/main/TODO.md).
 
-Runtime mappings, ABI и metadata принадлежат Go definitions в
-`contracts/{abi,actions,codes,invoke,documents}.go`; JSON schemas — в
-`contracts/schema/`. `make generate` публикует весь набор `contracts/v1/*.json`,
-а `make check-generated` проверяет воспроизводимость exact bytes. Runtime
-использует определения из кода. Wire values, limits и execution semantics
-сохранены; canonical JSON formatting меняет document digests, которые SDK
-получает из актуальных bytes.
+## Модули и атомарная конфигурация
 
-Application разделён на `config/` (decode и атомарный snapshot) и `module/`
-(artifact operations и invoke). SDK admin adapter находится в
-`internal/presentation/admin/`, peer adapter — в `peerplugin/`.
-Native Go tests находятся рядом с владельцами; `tests/` сохраняет
-child-process E2E. Полный независимый quality gate: `GOWORK=off GOFLAGS=-p=1
-make check` и `make check-race`; hosted Linux/macOS gate остаётся отдельным
-подтверждением.
+Core хранит exact JSON settings generation. По SDK `Reload` Runtime получает точные bytes и проверяет generation/digest, settings schema, ссылки на artifacts и совместимость ABI до активации.
 
-Каждая Runtime-группа — отдельная единица развёртывания и масштабирования.
-Группа имеет явный `groupId`, ссылку на Domain instance, immutable WASM
-artifact digest и список команд. Каждая команда допускает только перечисленные
-tenant/site scopes и сущности; host передаёт доверенный scope из caller context,
-а не из произвольного WASM payload.
+Generation содержит каталог `moduleId → immutable artifact digest` и команды. Каждая команда указывает `moduleId + export`, собственный перечень доступных entities и allowlist plugin target/method для host calls. Все настроенные exports проверяются на наличие и ABI-совместимую сигнатуру до активации; именно выбранный export вызывается для команды. Идентификаторы в пределах generation уникальны; синтаксически некорректные target/method отклоняются, а наличие Core caller→target link проверяется при каждом host call, чтобы изменения и отзыв link применялись без устаревшего cache. Размер одного artifact ограничен 16 MiB, сумма всех WASM bytes в candidate generation — 128 MiB; generation сверх лимита отклоняется до копирования в активное хранилище, предыдущая активная generation сохраняется.
 
-WASM запускается через wazero с [версионированным JSON input/output ABI](https://github.com/Liapoldus/runtime/blob/main/contracts/v1/wasm-abi.json):
-module экспортирует `memory`, `alloc(length) → pointer` и
-`invoke(pointer, length) → i64`, где старшие 32 бита результата содержат
-длину, младшие — адрес JSON-ответа. Вызов ограничен временем, объёмом
-input/output и памятью значениями из ABI contract. Исполнение идёт без
-WASI, прямых network и filesystem функций. Узкие host-функции проверяют права
-перед Domain или другими разрешёнными peer-вызовами. `runtime.invoke` —
-product-owned peer method. Публичная Server HTTP-маршрутизация этого метода
-отложена до v3: в v2 Server остаётся неизменённым v1 regression baseline.
-Одна транзакция ограничена одним Domain batch, не всей цепочкой между плагинами.
+Settings v2 имеют `modules: [{moduleId, sha256}]` и `commands: [{name, moduleId, export, entities, calls?}]`. `calls` — список `{plugin, method}`; `plugin` — target instance из Core-owned plugin links. Старые `groupId`, `modelInstanceId`, одиночный `module`, `tenantSites` и scope в `runtime.invoke` не принимаются. `entities` ограничивает Domain calls этой команды.
 
-`maxMemoryPages` — жёсткий предел линейной памяти модуля: попытка превысить
-его не может расширить WASM instance за установленную границу. Если модуль
-после отказа роста обращается за пределы оставшейся памяти и traps, Runtime
-возвращает только bounded `execution_failed`; динамические сообщения и детали
-trap не входят в ответ. Код описан в [каталоге ошибок](https://github.com/Liapoldus/runtime/blob/main/contracts/v1/wasm-errors.json).
-Adversarial fixture проверяет попытку вырасти на 1024 pages сверх исходной
-страницы при contract cap 1024 и сохранение активного поколения:
-[`tests/wasm-memory-limit.test.ts`](https://github.com/Liapoldus/runtime/blob/main/tests/wasm-memory-limit.test.ts).
+Весь candidate — settings, каталог module digests, command routes и host-call permissions — активируется одним in-memory atomic swap. Любая ошибка или отмена контекста до активации сохраняет предыдущую активную generation. Артефакты хранятся content-addressed по SHA-256 на filesystem Runtime; настройки и mapping приходят только из Core. После рестарта Core повторно применяет generation, Runtime валидирует artifacts и строит новый active snapshot.
 
-Лимит `maxDurationMillis` начинается до компиляции модуля и охватывает
-компиляцию, инстанцирование (включая WASM start function) и ABI-вызовы.
-Истечение этого общего deadline возвращает `execution_timeout`, в том числе
-если зависает start function; ошибка структуры модуля без истечения deadline
-остаётся `invalid_module`.
-Отмена родительского `context` сохраняется как отмена вызова и не подменяется
-ошибкой `execution_timeout`; при отмене WASM instance закрывается без возврата
-частичного результата.
+## WASM execution и изоляция
 
-При `SIGINT` или `SIGTERM` Runtime сначала помечает себя неготовым и прекращает
-принимать новые peer-вызовы, затем останавливает приём новых peer-сессий и
-gracefully закрывает Plugin SDK REST listener. Уже допущенные `runtime.invoke`
-могут завершиться в пределах общего `pluginShutdownGraceSeconds`; после начала
-drain новые вызовы получают `503 not_ready`. Если grace истёк, процесс
-завершается в установленный срок, а результат оборванного вызова считается
-неизвестным и не воспроизводится автоматически. Проверка настоящего дочернего
-`cmd/runtime` покрывает SIGINT во время bounded WASM-вызова и отказ нового
-вызова после начала drain: [`tests/peer-invoke.test.ts`](https://github.com/Liapoldus/runtime/blob/main/tests/peer-invoke.test.ts).
+- Каждый `runtime.invoke` создаёт изолированный WASM instance для одного вызова. Между вызовами не сохраняются linear memory, globals, таблицы или mutable module state. Immutable compiled modules допускается кэшировать.
+- Versioned JSON ABI задаёт exports, типы, лимиты module/input/output/memory/execution и список разрешённых host modules. Настройки выбирают только объявленные ABI возможности; невалидный import отклоняется при admission.
+- ABI v2 разрешает только `liapoldus.plugin.v2.call(i32 ptr, i32 len) -> i64`. Вход — UTF-8 JSON `{ "plugin": string, "method": string, "payload": object }` в памяти гостя; packed i64 возвращает pointer/length JSON-ответа `{ "ok": boolean, "payload"?: any, "error"?: string }`.
+- WASM не получает прямого доступа к сети, filesystem, WASI, process environment или неограниченной памяти. Host functions доступны только через зарегистрированные Runtime capabilities и per-command allowlist.
+- На один invocation разрешено не более 32 host calls; JSON request/response каждого вызова ограничен 256 KiB. Общий execution deadline ABI — 5 секунд, memory cap — 1024 pages; cancellation распространяется в host caller и завершает instance. Частичный результат не возвращается как успех.
 
-Runtime подключён к Plugin SDK REST lifecycle. При `Reload` SDK запрашивает у
-Core точные bytes целевого поколения через mTLS, а application applier
-проверяет settings до их применения. Валидация отвергает неизвестные и
-trailing JSON-поля, проверяет идентификаторы, scope, уникальность и границы
-коллекций. Plugin повторно сверяет digest с исходными bytes и проверяет
-соответствие schema version до атомарного pointer swap; отказанная конфигурация
-не заменяет активный snapshot и не подтверждается readiness. Сквозной тест запускает собранный `cmd/runtime` и
-проверяет успешное поколение, отказ invalid candidate с сохранением предыдущих
-настроек и последующую активацию валидного поколения:
-[`tests/runtime-lifecycle.test.ts`](https://github.com/Liapoldus/runtime/blob/main/tests/runtime-lifecycle.test.ts).
+## Вызовы других plugins
 
-При `Reload` Runtime до ACK находит immutable WASM artifact по
-`module.sha256`, ограниченно читает его, повторно проверяет SHA-256 и ABI без
-исполнения WASM start function, затем одним atomic pointer swap публикует
-settings и байты модуля как согласованную in-memory generation. Missing,
-tampered, digest-mismatched или ABI-incompatible module оставляет прежнюю пару
-активной. Artifact хранится на persistent filesystem в content-addressed
-directory, задаваемой абсолютным `--artifact-dir`; пользовательская конфигурация
-по-прежнему приходит только из Core через Plugin SDK `Reload`/exact-generation
-pull.
+WASM обращается к другим plugins только через versioned host ABI Runtime. Runtime проверяет текущую команду, target и method по активной Core-owned configuration, применяет payload/deadline limits, затем разрешает target через Core peer directory и использует generic authenticated `pluginprotocol`. Runtime не принимает endpoint из WASM и не обходит Core-owned caller→target link policy. Если target не имеет ровно одного разрешённого/resolvable route либо peer identity не совпадает, вызов завершается безопасной ошибкой; автоматического переключения carrier или target нет.
 
-Загрузка модулей принадлежит Runtime Admin Surface: action использует общий
-Plugin SDK multipart artifact stream с `application/wasm`, метаданными SHA-256 и
-лимитом артефакта 16 MiB. Runtime сверяет заявленный digest с фактическими
-байтами, проверяет ABI и сохраняет неизменяемый файл по digest; повторная
-передача тех же байт не создаёт вторую копию. Каталог показывает только файлы,
-повторно прошедшие digest- и ABI-проверку. Описания action, metadata, receipt и
-лимитов принадлежат `contracts/v1/admin-*` и `module-artifact-*.schema.json`.
-`tests/runtime-lifecycle.test.ts` использует Core-side Plugin SDK client против
-реального Runtime child process: проверяет mTLS, multipart upload, receipts,
-каталог и последующий Reload. Core Management API forwarding до Runtime ещё не
-покрыт этим тестом.
+В v2 host call — ограниченный синхронный request/response. Streaming, произвольные targets/methods, прямые network imports и распределённые транзакции не поддерживаются. Ошибки peer call возвращаются в типизированном ABI без секретов и чужих payload. Deadlines/cancellation передаются до transport и целевого plugin; неизвестный outcome side-effecting вызова не воспроизводится автоматически.
 
-In-memory snapshot не переживает остановку процесса, но артефакты переживают:
-файл модуля лежит в artifact-dir по digest. После старта Core повторно вызывает
-`Reload`, а Runtime вновь получает exact generation и собирает пару из
-сохранённого артефакта.
-`tests/runtime-restart-reconnect.test.ts` запускает два дочерних Runtime
-процесса против fake Core в том же процессе: первый применяет поколение,
-затем Core выключается (503) и стартует второй реплика с тем же artifact-dir.
-Пока Core недоступен, exact-generation `Reload` чисто отклоняется
-(pending, ready=false), процесс жив; после возврата Core та же пара поколение +
-digest применяется повторно без нового upload (каталог восстановлен из
-persistent filesystem), повторное объявление того же поколения идемпотентно
-репортится как `alreadyActive` без смены active pair, и следующее поколение
-применяется штатно. Полный Core restart/reconciliation gate (обе стороны, Core
-SDK v2 registration/lease) остаётся открытым. Сквозной transport E2E загрузки
-модуля, продуктовые host-функции и peer-вызовы также остаются в
-[TODO](https://github.com/Liapoldus/runtime/blob/main/TODO.md).
-Runtime не объявляется production ready, пока эти и остальные пункты v2 не
-пройдут сквозные проверки. `contracts/v1` — версия собственного контракта
-плагина, не обещание релиза Liapoldus v1.
+Host-call import, per-command allowlist и directory/dial adapter реализованы для `runtime.invoke`. Для Domain Runtime сверяет entity у каждой CRUD/transaction операции и извлекает все `FROM/JOIN` источники read-only SQL, отклоняя запрос, если хотя бы одна entity отсутствует в allowlist команды. Directory poll использует mTLS identity certificate на каждый вызов; отсутствие/неоднозначность link, несовместимый контракт, истёкшая eligibility, невалидный peer certificate или transport failure закрывают вызов без fallback и retry. Реальный Core→SDK→Runtime→Domain test подтвердил eligible directory endpoint, Domain write deny/allow по Runtime identity, Runtime entity/method narrowing, отказ после удаления Core peer link, Core directory refresh после рестарта Domain и повторное применение exact generation после рестарта Runtime. Отдельный случай проверяет границу нового mTLS incarnation: Core-grant обновляется для identity нового процесса, затем разрешённый write завершается под SIGTERM drain. Mock-Core child-process acceptance также подтверждает cancellation и отсутствие replay во внешнем plugin handler; остаются hosted OS, hosted CI и полное lease-fencing acceptance.
+
+Отказы host call остаются общими для WASM (`call_failed`), но operator log содержит закрытый диагностический `stage` (например, `no_ready_peer` или `peer_dial`) без адресов, identities, payload и raw transport error. Это позволяет различать routing/readiness и transport failure, не раскрывая чувствительные данные.
+
+## Domain access и права
+
+Domain предоставляет одну global ER-модель и volatile object set. Он не принимает tenant/site/group/OwnerGroup scopes. Аутентифицированные plugins читают все entities; writes разрешаются Core grant `mTLS identity → entity → operation`. Для вызовов из WASM Domain видит mTLS identity Runtime процесса.
+
+Runtime command allowlist может сузить доступ команды до конкретных Domain entities и peer methods, но не расширяет grants Runtime identity в Core и не подменяет проверку Domain. Если Domain restart или изменение его model digest удалило данные, Runtime не утверждает, что старое состояние сохранилось.
+
+## Runtime транзакционные гарантии
+
+Атомарность транзакций относится только к одному `domain.transaction`. Цепочка вызовов других plugins не является общей транзакцией и может иметь частичные внешние эффекты. Runtime не делает auto-replay. Side-effecting command owners обязаны проектировать идемпотентность/компенсацию на своих API границах; Runtime не обещает exactly-once через потерю процесса или ответа.
+
+## Lifecycle, artifacts и observability
+
+SDK replica registration/lease, mTLS, exact-generation pull, ACK/rejection, graceful drain, compatibility metadata и readiness остаются общими platform contracts. Один Runtime group может иметь operator-managed replicas; rollout допускается только для совместимых ABI/artifact/settings/peer contracts и после Core rollout policy.
+
+Admin artifact upload ограничен size и выполняет digest+ABI validation до content-addressed publication. Конфигурация может ссылаться только на проверенный immutable artifact. Артефакт переживает restart; active settings/runtime state пересобираются по exact generation. Вызов команды читает pinned immutable generation и использует только выбранный артефакт: несвязанные module bytes не копируются на каждый вызов. Одновременно допускаются не более четырёх WASM invocations; лишний вызов до admission получает retryable `overloaded` до выполнения команды и побочных эффектов. Диагностика сообщает active generation/digests, command/module routing, readiness, resource counters и отказанные host capabilities без исходного WASM payload или секретов.
+
+## Приёмка production v2
+
+Локальные native и child-process tests уже проверяют несколько модулей/routes, missing/tampered/ABI-incompatible artifacts, atomic generation rejection, instance isolation, hostile imports, target/method denial, Domain grants по Runtime mTLS identity, payload/deadline/cancellation bounds и отсутствие replay. Shutdown-drain fixture использует детерминированный барьер через реальный authenticated mTLS `pluginprotocol` host call: Runtime сигнализируется только после admission, новые вызовы отклоняются, а уже принятый завершается после освобождения mock handler; проверка не зависит от скорости CPU. Отдельный child-process сценарий с mock Core и plugin проверяет, что отмена внешнего `runtime.invoke` достигает удалённого plugin handler и операция не переигрывается. Реальный Core acceptance проверяет invalid-route rejection с сохранением старого поколения и восстановлением после следующей валидной конфигурации, exact-generation startup и restart/reconnect Runtime и Domain, Core-visible deregistration и coordinated drain вызова, который уже совершил Domain write. Полное lease fencing и hosted Linux/прочие заявленные OS остаются открыты; Server HTTP routing вне v2.

@@ -1,0 +1,104 @@
+{
+  "$defs": {
+    "identifier": {
+      "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$",
+      "type": "string"
+    }
+  },
+  "$id": "https://liapoldus.github.io/spec/runtime/v2/settings.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "commands": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "calls": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "method": {
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}\\.[A-Za-z][A-Za-z0-9_]{0,63}$",
+                  "type": "string"
+                },
+                "plugin": {
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "plugin",
+                "method"
+              ],
+              "type": "object"
+            },
+            "maxItems": 64,
+            "type": "array"
+          },
+          "entities": {
+            "items": {
+              "$ref": "#/$defs/identifier"
+            },
+            "maxItems": 128,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "export": {
+            "$ref": "#/$defs/identifier"
+          },
+          "moduleId": {
+            "$ref": "#/$defs/identifier"
+          },
+          "name": {
+            "$ref": "#/$defs/identifier"
+          }
+        },
+        "required": [
+          "name",
+          "moduleId",
+          "export",
+          "entities"
+        ],
+        "type": "object"
+      },
+      "maxItems": 128,
+      "minItems": 1,
+      "type": "array"
+    },
+    "modules": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "moduleId": {
+            "$ref": "#/$defs/identifier"
+          },
+          "sha256": {
+            "pattern": "^[a-f0-9]{64}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "moduleId",
+          "sha256"
+        ],
+        "type": "object"
+      },
+      "maxItems": 64,
+      "minItems": 1,
+      "type": "array",
+      "uniqueItems": true
+    },
+    "schemaVersion": {
+      "const": "2"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "modules",
+    "commands"
+  ],
+  "title": "Runtime v2 settings",
+  "type": "object"
+}

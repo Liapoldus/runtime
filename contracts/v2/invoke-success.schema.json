@@ -1,5 +1,5 @@
 {
-  "$id": "https://liapoldus.github.io/spec/runtime/v1/invoke-success.schema.json",
+  "$id": "https://liapoldus.github.io/spec/runtime/v2/invoke-success.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "Content of the body string returned for a successful runtime.invoke call, wrapped by the transport in the advertised response action.",
@@ -14,6 +14,6 @@
     "command",
     "output"
   ],
-  "title": "Runtime v1 invoke success body",
+  "title": "Runtime v2 invoke success body",
   "type": "object"
 }

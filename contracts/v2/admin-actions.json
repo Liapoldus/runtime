@@ -102,7 +102,7 @@
       "semantics": "content-addressed"
     },
     "kind": "artifact-action",
-    "metadataSchema": "contracts/v1/module-artifact-metadata.schema.json",
+    "metadataSchema": "contracts/v2/module-artifact-metadata.schema.json",
     "multipart": {
       "artifactFilenameForwarded": false,
       "order": [
@@ -115,7 +115,7 @@
       ]
     },
     "ownership": "plugin-admin-surface-action",
-    "receiptSchema": "contracts/v1/module-artifact-receipt.schema.json",
+    "receiptSchema": "contracts/v2/module-artifact-receipt.schema.json",
     "surfaceBinding": {
       "page": "modules",
       "section": "modules",

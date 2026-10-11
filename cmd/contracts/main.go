@@ -27,7 +27,7 @@ func run(check bool) error {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	entries, err := os.ReadDir("contracts/v1")
+	entries, err := os.ReadDir("contracts/v2")
 	if err != nil {
 		return err
 	}
@@ -41,7 +41,7 @@ func run(check bool) error {
 		if err != nil {
 			return err
 		}
-		path := filepath.Join("contracts/v1", name)
+		path := filepath.Join("contracts/v2", name)
 		if check {
 			//nolint:gosec // G304: name comes exclusively from the code-owned contract set.
 			old, err := os.ReadFile(path)
