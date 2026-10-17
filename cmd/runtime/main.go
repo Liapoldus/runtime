@@ -480,7 +480,7 @@ func mapPresentationContract(contract infrastructure.HTTPContract) (presentation
 	result := presentation.Contracts{
 		ContractVersion:  contract.ContractVersion,
 		IdentityEndpoint: routes["identity"], ManifestEndpoint: routes["manifest"],
-		ConfigSchemaEndpoint: routes["configSchema"], HealthEndpoint: routes["health"],
+		ConfigSchemaEndpoint: routes["configSchema"], ConfigValidationEndpoint: routes["configValidate"], HealthEndpoint: routes["health"],
 		ReadyEndpoint: routes["ready"], ReloadEndpoint: routes["reload"],
 		ArtifactStreamEndpoint: routes["artifactStream"], AdminSurfaceEndpoint: routes["adminSurface"],
 		AdminActionEndpoint: routes["adminAction"], MetricsEndpoint: routes["metrics"],
@@ -596,6 +596,16 @@ func (provider metadataProvider) Manifest(context.Context) ([]byte, error) {
 
 func (provider metadataProvider) ConfigurationSchema(context.Context) ([]byte, error) {
 	return append([]byte(nil), provider.documents.ConfigurationSchema...), nil
+}
+
+func (provider metadataProvider) ValidateConfiguration(ctx context.Context, raw []byte) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if _, code := runtimeconfig.DecodeConfiguration(raw); code != "" {
+		return runtimeconfig.ErrConfigurationRejected
+	}
+	return nil
 }
 
 func (provider metadataProvider) AdminSurface(context.Context) ([]byte, error) {

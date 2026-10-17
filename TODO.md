@@ -276,3 +276,8 @@ not hosted CI or cross-OS qualification.
   authenticated Runtime mTLS identity plus Core entity/operation grants.
 - No public Server HTTP route in v2. Operator controls process count and
   deployment; Core does not install or supervise Runtime workloads.
+
+
+## Config preflight endpoint — 2026-10-17
+
+- Runtime metadata now validates candidate command/module routing without activation. This lets Core reject a broken candidate while keeping the active catalog and generation ready. Go tests, vet and build passed. Commit/push pending.
