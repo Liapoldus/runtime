@@ -1,4 +1,4 @@
-// Package admin adapts Runtime module administration to the Plugin SDK.
+// Package admin adapts Runtime module administration to the Service SDK.
 package admin
 
 import (
@@ -8,7 +8,7 @@ import (
 	"errors"
 	"io"
 
-	sdkpresentation "github.com/Liapoldus/plugin-sdk/v2/presentation"
+	sdkpresentation "github.com/Liapoldus/service-sdk/v2/presentation"
 	"github.com/Liapoldus/runtime/contracts"
 	runtimemodule "github.com/Liapoldus/runtime/internal/application/module"
 	"github.com/Liapoldus/runtime/internal/domain/models"

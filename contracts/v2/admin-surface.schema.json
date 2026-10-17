@@ -1,5 +1,5 @@
 {
-  "$id": "https://liapoldus.github.io/plugins/runtime/admin-ui/v1/schema.json",
+  "$id": "https://liapoldus.github.io/services/runtime/admin-ui/v1/schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
@@ -181,9 +181,6 @@
       "minItems": 1,
       "type": "array"
     },
-    "plugin": {
-      "const": "runtime"
-    },
     "requiredCapabilities": {
       "items": {
         "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$",
@@ -193,16 +190,19 @@
       "type": "array",
       "uniqueItems": true
     },
+    "service": {
+      "const": "runtime"
+    },
     "version": {
       "const": 1
     }
   },
   "required": [
     "version",
-    "plugin",
+    "service",
     "requiredCapabilities",
     "pages"
   ],
-  "title": "Runtime plugin Admin Surface v1",
+  "title": "Runtime service Admin Surface v1",
   "type": "object"
 }

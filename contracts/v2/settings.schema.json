@@ -22,13 +22,13 @@
                   "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}\\.[A-Za-z][A-Za-z0-9_]{0,63}$",
                   "type": "string"
                 },
-                "plugin": {
+                "service": {
                   "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
                   "type": "string"
                 }
               },
               "required": [
-                "plugin",
+                "service",
                 "method"
               ],
               "type": "object"

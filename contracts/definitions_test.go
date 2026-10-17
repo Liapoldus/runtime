@@ -95,12 +95,12 @@ func TestDefinitionsDoNotShareMutableMaps(t *testing.T) {
 }
 
 func TestGeneratedMetadataAndABI(t *testing.T) {
-	metadata, err := contracts.PluginDocuments()
+	metadata, err := contracts.RuntimeDocuments()
 	if err != nil {
 		t.Fatal(err)
 	}
 	for name, actual := range map[string][]byte{
-		"plugin.json": metadata.Manifest, "settings.schema.json": metadata.ConfigurationSchema, "admin-surface.json": metadata.AdminSurface,
+		"manifest.json": metadata.Manifest, "settings.schema.json": metadata.ConfigurationSchema, "admin-surface.json": metadata.AdminSurface,
 	} {
 		//nolint:gosec // G304: reads known contract filenames in the repository artifact directory.
 		published, err := os.ReadFile(filepath.Join("v2", name))
@@ -135,7 +135,7 @@ func TestVersionedRuntimeSchemasCarryV2Titles(t *testing.T) {
 	}
 }
 
-func TestSettingsSchemaAllowsGenericPluginProtocolMethods(t *testing.T) {
+func TestSettingsSchemaAllowsGenericServiceMethods(t *testing.T) {
 	raw, err := contracts.Document("settings.schema.json")
 	if err != nil {
 		t.Fatal(err)
@@ -151,26 +151,36 @@ func TestSettingsSchemaAllowsGenericPluginProtocolMethods(t *testing.T) {
 	calls := schemaObject(t, commandProperties, "calls")
 	callItems := schemaObject(t, calls, "items")
 	callProperties := schemaObject(t, callItems, "properties")
+	service, exists := callProperties["service"].(map[string]any)
+	if !exists {
+		t.Fatal("settings schema is missing the service target field")
+	}
+	if _, exists := callProperties["plugin"]; exists {
+		t.Fatal("settings schema still accepts the retired plugin target field")
+	}
+	if service["pattern"] != "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$" {
+		t.Fatalf("service target pattern changed: %v", service["pattern"])
+	}
 	method := schemaObject(t, callProperties, "method")
 	pattern, ok := method["pattern"].(string)
 	if !ok {
-		t.Fatal("plugin method schema has no pattern")
+		t.Fatal("service method schema has no pattern")
 	}
 	if method["maxLength"] != float64(128) {
-		t.Fatalf("plugin method schema maxLength = %v, want 128", method["maxLength"])
+		t.Fatalf("service method schema maxLength = %v, want 128", method["maxLength"])
 	}
 	compiled, err := regexp.Compile(pattern)
 	if err != nil {
-		t.Fatalf("plugin method schema pattern is invalid: %v", err)
+		t.Fatalf("service method schema pattern is invalid: %v", err)
 	}
 	for _, value := range []string{"domain.transaction", "metrics.aggregate"} {
 		if !compiled.MatchString(value) {
-			t.Errorf("settings schema rejects generic plugin method %q", value)
+			t.Errorf("settings schema rejects generic service method %q", value)
 		}
 	}
 	for _, value := range []string{"metrics.aggregate.v2", "metrics.aggregate-now"} {
 		if compiled.MatchString(value) {
-			t.Errorf("settings schema accepts unsupported plugin method %q", value)
+			t.Errorf("settings schema accepts unsupported service method %q", value)
 		}
 	}
 }

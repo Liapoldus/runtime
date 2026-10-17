@@ -4,7 +4,7 @@
   "outputFormat": "json",
   "resultEncoding": "i64:high32=length,low32=pointer",
   "hostModules": [
-    "liapoldus.plugin.v2"
+    "liapoldus.service.v2"
   ],
   "exports": {
     "memory": "memory",

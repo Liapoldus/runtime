@@ -66,7 +66,7 @@ func TestActivationPreservesExactBytesAndSnapshotIsolation(t *testing.T) {
 	otherModule[0] = 'Z'
 	if _, err := store.WithCommand("submit", func(view config.CommandView) error {
 		view.Command.Entities[0] = "mutated"
-		view.Command.Calls = []models.PluginMethod{{Plugin: "domain", Method: "domain.get"}}
+		view.Command.Calls = []models.ServiceCall{{Service: "domain", Method: "domain.get"}}
 		return nil
 	}); err != nil {
 		t.Fatal(err)

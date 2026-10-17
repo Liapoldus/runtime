@@ -60,7 +60,7 @@ func TestConfigurationValidationBoundsAndRoutes(t *testing.T) {
 			case "calls":
 				candidate.Commands[0].Calls = nil
 				for i := range size {
-					candidate.Commands[0].Calls = append(candidate.Commands[0].Calls, models.PluginMethod{Plugin: "domain", Method: fmt.Sprintf("domain.method_%d", i)})
+			candidate.Commands[0].Calls = append(candidate.Commands[0].Calls, models.ServiceCall{Service: "domain", Method: fmt.Sprintf("domain.method_%d", i)})
 				}
 			}
 			want := ""

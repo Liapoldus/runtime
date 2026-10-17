@@ -101,7 +101,7 @@ describe('runtime.invoke peer surface', () => {
     expect(output.input).toMatchObject({ message: 'wrapped' });
   });
 
-  it('propagates child-process invocation cancellation through a live plugin host call', () => {
+  it('propagates child-process invocation cancellation through a live service host call', () => {
     expect(results.hostCallCancelled.call.status).not.toBe(200);
     expect(
       results.hostCallCancelled.call.code === 'cancelled' ||

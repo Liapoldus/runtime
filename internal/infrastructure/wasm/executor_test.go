@@ -11,20 +11,20 @@ import (
 )
 
 func TestExecutorAllowsOnlyBoundedVersionedHostCall(t *testing.T) {
-	module, err := hex.DecodeString("0061736d01000000010c0260017f017f60027f7f017e021c01136c6961706f6c6475732e706c7567696e2e76320463616c6c000103030200010503010001071b03066d656d6f7279020005616c6c6f63000106696e766f6b6500020a0f02040041000b08002000200110000b")
+	module, err := hex.DecodeString("0061736d01000000010c0260017f017f60027f7f017e021d01146c6961706f6c6475732e736572766963652e76320463616c6c000103030200010503010001071b03066d656d6f7279020005616c6c6f63000106696e766f6b6500020a0f02040041000b08002000200110000b")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := wasm.ValidateModule(context.Background(), module); err != nil {
 		t.Fatalf("versioned host import rejected: %v", err)
 	}
-	request := []byte(`{"plugin":"domain","method":"domain.query","payload":{"sql":"SELECT 1"}}`)
+	request := []byte(`{"service":"domain","method":"domain.query","payload":{"sql":"SELECT 1"}}`)
 	calls := 0
 	output, err := (wasm.Executor{}).ExecuteWithHostExport(context.Background(), module, "invoke", request,
-		func(_ context.Context, plugin, method string, payload json.RawMessage) (json.RawMessage, error) {
+		func(_ context.Context, service, method string, payload json.RawMessage) (json.RawMessage, error) {
 			calls++
-			if plugin != "domain" || method != "domain.query" || string(payload) != `{"sql":"SELECT 1"}` {
-				t.Fatalf("host call arguments changed: %s %s %s", plugin, method, payload)
+			if service != "domain" || method != "domain.query" || string(payload) != `{"sql":"SELECT 1"}` {
+				t.Fatalf("host call arguments changed: %s %s %s", service, method, payload)
 			}
 			return json.RawMessage(`{"rows":[]}`), nil
 		})
@@ -59,18 +59,18 @@ func TestExecutorDoesNotRetainMutableGuestStateBetweenInvocations(t *testing.T) 
 	}
 }
 
-func TestExecutorHostABIIsPluginAgnostic(t *testing.T) {
-	module, err := hex.DecodeString("0061736d01000000010c0260017f017f60027f7f017e021c01136c6961706f6c6475732e706c7567696e2e76320463616c6c000103030200010503010001071b03066d656d6f7279020005616c6c6f63000106696e766f6b6500020a0f02040041000b08002000200110000b")
+func TestExecutorHostABIPreservesServiceTargetAndMethod(t *testing.T) {
+	module, err := hex.DecodeString("0061736d01000000010c0260017f017f60027f7f017e021d01146c6961706f6c6475732e736572766963652e76320463616c6c000103030200010503010001071b03066d656d6f7279020005616c6c6f63000106696e766f6b6500020a0f02040041000b08002000200110000b")
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := []byte(`{"plugin":"metrics","method":"metrics.aggregate","payload":{"measure":"active-users"}}`)
+	request := []byte(`{"service":"metrics","method":"metrics.aggregate","payload":{"measure":"active-users"}}`)
 	calls := 0
 	output, err := (wasm.Executor{}).ExecuteWithHostExport(context.Background(), module, "invoke", request,
-		func(_ context.Context, plugin, method string, payload json.RawMessage) (json.RawMessage, error) {
+		func(_ context.Context, service, method string, payload json.RawMessage) (json.RawMessage, error) {
 			calls++
-			if plugin != "metrics" || method != "metrics.aggregate" || string(payload) != `{"measure":"active-users"}` {
-				t.Fatalf("generic host call was changed: %s %s %s", plugin, method, payload)
+			if service != "metrics" || method != "metrics.aggregate" || string(payload) != `{"measure":"active-users"}` {
+				t.Fatalf("generic host call was changed: %s %s %s", service, method, payload)
 			}
 			return json.RawMessage(`{"count":7}`), nil
 		})
@@ -80,6 +80,20 @@ func TestExecutorHostABIIsPluginAgnostic(t *testing.T) {
 	if calls != 1 || string(output) != `{"ok":true,"payload":{"count":7}}` {
 		t.Fatalf("generic host ABI result: calls=%d output=%s", calls, output)
 	}
+	legacyRequest := []byte(`{"plugin":"metrics","method":"metrics.aggregate","payload":{"measure":"active-users"}}`)
+	legacyCalls := 0
+	legacyOutput, err := (wasm.Executor{}).ExecuteWithHostExport(context.Background(), module, "invoke", legacyRequest,
+		func(context.Context, string, string, json.RawMessage) (json.RawMessage, error) {
+			legacyCalls++
+			t.Fatal("legacy plugin target reached the host")
+			return nil, nil
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacyCalls != 0 || string(legacyOutput) != `{"ok":false,"error":"host_call_rejected"}` {
+		t.Fatal("legacy plugin target payload remains accepted")
+	}
 }
 
 func TestExecutorReturnsHostResponseAfterFiniteGuestLoop(t *testing.T) {
@@ -88,7 +102,7 @@ func TestExecutorReturnsHostResponseAfterFiniteGuestLoop(t *testing.T) {
 		t.Fatalf("finite host-call module rejected: %v", err)
 	}
 	calls := 0
-	request := []byte(`{"plugin":"domain","method":"domain.query","payload":{"sql":"SELECT 1"}}`)
+	request := []byte(`{"service":"domain","method":"domain.query","payload":{"sql":"SELECT 1"}}`)
 	output, err := (wasm.Executor{}).ExecuteWithHostExport(context.Background(), module, "invoke", request,
 		func(context.Context, string, string, json.RawMessage) (json.RawMessage, error) {
 			calls++
@@ -137,7 +151,7 @@ func finiteHostCallLoopModule(t *testing.T, iterations uint32) []byte {
 	types := []byte{2, 0x60, 1, 0x7f, 1, 0x7f, 0x60, 2, 0x7f, 0x7f, 1, 0x7e}
 	module = section(module, 1, types)
 	imports := []byte{1}
-	imports = append(imports, name("liapoldus.plugin.v2")...)
+	imports = append(imports, name("liapoldus.service.v2")...)
 	imports = append(imports, name("call")...)
 	imports = append(imports, 0, 1)
 	module = section(module, 2, imports)

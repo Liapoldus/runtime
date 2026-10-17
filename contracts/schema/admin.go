@@ -4,8 +4,8 @@ package schema
 func Actions() map[string]any {
 	return map[string]any{
 		"$schema": "https://json-schema.org/draft/2020-12/schema",
-		"$id":     "https://liapoldus.github.io/plugins/runtime/admin-actions/v1/schema.json",
-		"title":   "Runtime plugin Admin Actions v1",
+		"$id":     "https://liapoldus.github.io/services/runtime/admin-actions/v1/schema.json",
+		"title":   "Runtime service Admin Actions v1",
 		"type":    "object",
 		"required": []any{
 			"runtime.modules.list",
@@ -30,7 +30,7 @@ func Actions() map[string]any {
 						"const": "query",
 					},
 					"ownership": map[string]any{
-						"const": "plugin-admin-surface-capability",
+						"const": "service-admin-surface-capability",
 					},
 					"surfaceBinding": map[string]any{
 						"type":                 "object",
@@ -83,7 +83,7 @@ func Actions() map[string]any {
 						"const": "artifact-action",
 					},
 					"ownership": map[string]any{
-						"const": "plugin-admin-surface-action",
+						"const": "service-admin-surface-action",
 					},
 					"surfaceBinding": map[string]any{
 						"type":                 "object",
@@ -106,7 +106,7 @@ func Actions() map[string]any {
 						},
 					},
 					"transport": map[string]any{
-						"const": "plugin-sdk.rest.artifact-stream",
+						"const": "service-sdk.rest.artifact-stream",
 					},
 					"multipart": map[string]any{
 						"type":                 "object",
@@ -213,13 +213,13 @@ func Actions() map[string]any {
 func Surface() map[string]any {
 	return map[string]any{
 		"$schema":              "https://json-schema.org/draft/2020-12/schema",
-		"$id":                  "https://liapoldus.github.io/plugins/runtime/admin-ui/v1/schema.json",
-		"title":                "Runtime plugin Admin Surface v1",
+		"$id":                  "https://liapoldus.github.io/services/runtime/admin-ui/v1/schema.json",
+		"title":                "Runtime service Admin Surface v1",
 		"type":                 "object",
 		"additionalProperties": false,
 		"required": []any{
 			"version",
-			"plugin",
+			"service",
 			"requiredCapabilities",
 			"pages",
 		},
@@ -227,7 +227,7 @@ func Surface() map[string]any {
 			"version": map[string]any{
 				"const": 1,
 			},
-			"plugin": map[string]any{
+			"service": map[string]any{
 				"const": "runtime",
 			},
 			"requiredCapabilities": map[string]any{

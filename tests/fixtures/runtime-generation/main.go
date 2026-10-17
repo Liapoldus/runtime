@@ -10,7 +10,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Liapoldus/plugin-sdk/v2/domain/models"
+	"github.com/Liapoldus/service-sdk/v2/domain/models"
 	runtimeconfig "github.com/Liapoldus/runtime/internal/application/config"
 	"github.com/Liapoldus/runtime/internal/infrastructure/artifacts"
 )

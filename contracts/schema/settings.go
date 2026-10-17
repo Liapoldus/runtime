@@ -60,9 +60,9 @@ func Settings() map[string]any {
 							"type": "array", "maxItems": 64,
 							"items": map[string]any{
 								"type": "object", "additionalProperties": false,
-								"required": []any{"plugin", "method"},
+								"required": []any{"service", "method"},
 								"properties": map[string]any{
-									"plugin": map[string]any{"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"},
+								"service": map[string]any{"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"},
 								"method": map[string]any{
 									"type": "string", "maxLength": 128,
 									"pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}\\.[A-Za-z][A-Za-z0-9_]{0,63}$",

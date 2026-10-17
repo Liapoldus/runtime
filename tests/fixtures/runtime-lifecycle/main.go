@@ -27,12 +27,12 @@ import (
 	"sort"
 	"time"
 
-	sdkmodels "github.com/Liapoldus/plugin-sdk/v2/domain/models"
-	"github.com/Liapoldus/plugin-sdk/v2/infrastructure"
 	"github.com/Liapoldus/runtime/contracts"
 	"github.com/Liapoldus/runtime/internal/domain/models"
 	"github.com/Liapoldus/runtime/internal/infrastructure/artifacts"
 	"github.com/Liapoldus/runtime/tests/fixtures/lifecyclecore"
+	sdkmodels "github.com/Liapoldus/service-sdk/v2/domain/models"
+	"github.com/Liapoldus/service-sdk/v2/infrastructure"
 )
 
 var errScenario = errors.New("runtime Reload integration scenario failed")
@@ -41,9 +41,9 @@ const (
 	instanceID     = "runtime-e2e"
 	replicaID      = "runtime-e2e-1"
 	coreCN         = "runtime-test-core"
-	runtimeCN      = "runtime-test-plugin"
+	runtimeCN      = "runtime-test-service"
 	callerCN       = "runtime-test-caller"
-	runtimePeerURI = "spiffe://liapoldus/plugin/runtime-e2e/runtime-e2e-1/inc-runtime"
+	runtimePeerURI = "spiffe://liapoldus/service/runtime-e2e/runtime-e2e-1/inc-runtime"
 	placementID    = "node-runtime"
 	incarnationID  = "inc-runtime"
 	callerPeerURI  = "spiffe://liapoldus.test/server"
@@ -108,7 +108,7 @@ func run() error {
 	}
 	moduleB := append(append([]byte(nil), moduleA...), 0, 3, 1, 'x', 0)
 	moduleADigest, moduleBDigest := sdkmodels.Digest(moduleA), sdkmodels.Digest(moduleB)
-	metadata, err := contracts.PluginDocuments()
+	metadata, err := contracts.RuntimeDocuments()
 	if err != nil {
 		return errScenario
 	}
@@ -261,7 +261,7 @@ func run() error {
 		return errScenario
 	}
 	defer transport.CloseIdleConnections()
-	client, err := infrastructure.NewPluginClient(contract, "https://"+address.ListenAddress, transport, peer)
+	client, err := infrastructure.NewServiceClient(contract, "https://"+address.ListenAddress, transport, peer)
 	if err != nil {
 		return errScenario
 	}
@@ -337,7 +337,7 @@ func run() error {
 	if core.lifecycle == nil {
 		return errScenario
 	}
-	core.lifecycle.RefuseRenewals()
+	core.lifecycle.RejectRenewals()
 	select {
 	case processErr := <-processWait:
 		processWaited = true

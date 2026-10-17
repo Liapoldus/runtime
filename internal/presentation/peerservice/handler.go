@@ -1,5 +1,5 @@
-// Package peerplugin exposes Runtime invocation over authenticated peer transport.
-package peerplugin
+// Package peerservice exposes Runtime invocation over authenticated peer transport.
+package peerservice
 
 import (
 	"bytes"
@@ -9,7 +9,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/Liapoldus/pluginprotocol/v3/presentation/peer"
+	"github.com/Liapoldus/wool/v3/presentation/peer"
 	"github.com/Liapoldus/runtime/contracts"
 	runtimemodule "github.com/Liapoldus/runtime/internal/application/module"
 )
@@ -17,7 +17,7 @@ import (
 // errInvalidHandler reports an unusable handler assembly. It is deliberately
 // opaque: the peer never exposes anything but the versioned invoke error codes.
 const (
-	messageInvalidHandler string = "peerplugin: invalid handler"
+	messageInvalidHandler string = "peerservice: invalid handler"
 )
 
 var errInvalidHandler = errors.New(messageInvalidHandler)
@@ -68,7 +68,7 @@ func (handler *Handler) invoke(ctx context.Context, call peer.Call) (peer.Result
 
 // requestPayload extracts the product body from a Server v1 httpRequestPayload
 // envelope whenever the payload carries one, and otherwise treats the whole
-// payload as the request document (a direct pluginprotocol caller). Transport
+// payload as the request document (a direct wool caller). Transport
 // context such as method, path, headers or remote address is never interpreted
 // by product logic.
 func requestPayload(payload []byte) []byte {

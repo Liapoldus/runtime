@@ -78,10 +78,10 @@ func ValidateConfiguration(config models.Configuration) string {
 		}
 		seenCalls := make(map[string]struct{}, len(command.Calls))
 		for _, call := range command.Calls {
-			if !ValidPluginTarget(call.Plugin) || !ValidPluginMethod(call.Method) {
+			if !ValidServiceTarget(call.Service) || !ValidServiceMethod(call.Method) {
 				return codeInvalidCommand
 			}
-			key := call.Plugin + "\x00" + call.Method
+			key := call.Service + "\x00" + call.Method
 			if _, duplicate := seenCalls[key]; duplicate {
 				return codeInvalidCommand
 			}
@@ -113,7 +113,7 @@ func asciiAlpha(character byte) bool {
 	return character >= 'A' && character <= 'Z' || character >= 'a' && character <= 'z'
 }
 
-func ValidPluginTarget(value string) bool {
+func ValidServiceTarget(value string) bool {
 	if len(value) == 0 || len(value) > 128 {
 		return false
 	}
@@ -127,7 +127,7 @@ func ValidPluginTarget(value string) bool {
 	return true
 }
 
-func ValidPluginMethod(value string) bool {
+func ValidServiceMethod(value string) bool {
 	if len(value) < 3 || len(value) > 128 {
 		return false
 	}

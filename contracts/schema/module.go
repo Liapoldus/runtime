@@ -4,7 +4,7 @@ package schema
 func Metadata() map[string]any {
 	return map[string]any{
 		"$schema":              "https://json-schema.org/draft/2020-12/schema",
-		"$id":                  "https://liapoldus.github.io/plugins/runtime/v2/module-artifact-metadata.schema.json",
+		"$id":                  "https://liapoldus.github.io/services/runtime/v2/module-artifact-metadata.schema.json",
 		"title":                "Runtime module upload metadata v2",
 		"type":                 "object",
 		"additionalProperties": false,
@@ -24,7 +24,7 @@ func Metadata() map[string]any {
 func Receipt() map[string]any {
 	return map[string]any{
 		"$schema":              "https://json-schema.org/draft/2020-12/schema",
-		"$id":                  "https://liapoldus.github.io/plugins/runtime/v2/module-artifact-receipt.schema.json",
+		"$id":                  "https://liapoldus.github.io/services/runtime/v2/module-artifact-receipt.schema.json",
 		"title":                "Runtime module upload receipt v2",
 		"type":                 "object",
 		"additionalProperties": false,

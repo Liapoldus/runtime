@@ -27,8 +27,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	sdkmodels "github.com/Liapoldus/plugin-sdk/v2/domain/models"
-	"github.com/Liapoldus/plugin-sdk/v2/infrastructure"
+	sdkmodels "github.com/Liapoldus/service-sdk/v2/domain/models"
+	"github.com/Liapoldus/service-sdk/v2/infrastructure"
 	"github.com/Liapoldus/runtime/contracts"
 	"github.com/Liapoldus/runtime/internal/domain/models"
 	"github.com/Liapoldus/runtime/internal/infrastructure/artifacts"
@@ -41,9 +41,9 @@ const (
 	instanceID     = "runtime-restart-e2e"
 	replicaID      = "runtime-restart-e2e-1"
 	coreCN         = "runtime-test-core"
-	runtimeCN      = "runtime-test-plugin"
+	runtimeCN      = "runtime-test-service"
 	callerCN       = "runtime-test-caller"
-	runtimePeerURI = "spiffe://liapoldus/plugin/runtime-restart-e2e/runtime-restart-e2e-1/inc-runtime"
+	runtimePeerURI = "spiffe://liapoldus/service/runtime-restart-e2e/runtime-restart-e2e-1/inc-runtime"
 	placementID    = "node-runtime"
 	incarnationID  = "inc-runtime"
 	callerPeerURI  = "spiffe://liapoldus.test/server"
@@ -127,7 +127,7 @@ func run() error {
 		return errScenario
 	}
 	moduleADigest := sdkmodels.Digest(moduleA)
-	metadata, err := contracts.PluginDocuments()
+	metadata, err := contracts.RuntimeDocuments()
 	if err != nil {
 		return errScenario
 	}
@@ -278,7 +278,7 @@ func run() error {
 	return json.NewEncoder(os.Stdout).Encode(result{Phase1: phase1, Phase2: phase2})
 }
 
-func phaseOne(client *infrastructure.PluginClient, store artifacts.Store, adminActions contracts.ModuleAdminActions, metadata contracts.PluginMetadata, module []byte, moduleDigest, instanceID string, generations map[string]storedGeneration) (map[string]any, error) {
+func phaseOne(client *infrastructure.ServiceClient, store artifacts.Store, adminActions contracts.ModuleAdminActions, metadata contracts.RuntimeMetadata, module []byte, moduleDigest, instanceID string, generations map[string]storedGeneration) (map[string]any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	surfaceDigest := surfaceDigestOf(metadata)
@@ -316,12 +316,12 @@ func phaseOne(client *infrastructure.PluginClient, store artifacts.Store, adminA
 	}, nil
 }
 
-func surfaceDigestOf(metadata contracts.PluginMetadata) string {
+func surfaceDigestOf(metadata contracts.RuntimeMetadata) string {
 	surfaceHash := sha256.Sum256(metadata.AdminSurface)
 	return "sha256:" + hex.EncodeToString(surfaceHash[:])
 }
 
-func listCatalog(ctx context.Context, client *infrastructure.PluginClient, adminActions contracts.ModuleAdminActions, instanceID, surfaceDigest string) (catalogView, error) {
+func listCatalog(ctx context.Context, client *infrastructure.ServiceClient, adminActions contracts.ModuleAdminActions, instanceID, surfaceDigest string) (catalogView, error) {
 	invocation := sdkmodels.AdminActionInvocation{
 		CallerID: "runtime-test-core", InstanceID: instanceID,
 		PageID: adminActions.List.SurfaceBinding.PageID, ActionID: adminActions.List.Capability,
@@ -408,7 +408,7 @@ func stopRuntime(process *runtimeProcess) {
 	}
 }
 
-func newClient(contract infrastructure.HTTPContract, credentials testCredentials, address string) (*infrastructure.PluginClient, error) {
+func newClient(contract infrastructure.HTTPContract, credentials testCredentials, address string) (*infrastructure.ServiceClient, error) {
 	coreCredentials, err := infrastructure.LoadCredentials(contract, infrastructure.CredentialsMaterial{
 		CAFile:                credentials.caFile,
 		ServerCertificateFile: credentials.coreServerCert,
@@ -442,7 +442,7 @@ func newClient(contract infrastructure.HTTPContract, credentials testCredentials
 	if err != nil {
 		return nil, errScenario
 	}
-	client, err := infrastructure.NewPluginClient(contract, "https://"+address, transport, peer)
+	client, err := infrastructure.NewServiceClient(contract, "https://"+address, transport, peer)
 	if err != nil {
 		return nil, errScenario
 	}

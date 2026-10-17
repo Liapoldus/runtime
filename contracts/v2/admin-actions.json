@@ -12,7 +12,7 @@
     },
     "httpStatus": 200,
     "kind": "query",
-    "ownership": "plugin-admin-surface-capability",
+    "ownership": "service-admin-surface-capability",
     "requestSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
@@ -95,7 +95,7 @@
       "required": true,
       "sameInput": "no-op",
       "scope": [
-        "plugin-instance",
+        "service-instance",
         "capability",
         "idempotency-key"
       ],
@@ -114,13 +114,13 @@
         "artifact"
       ]
     },
-    "ownership": "plugin-admin-surface-action",
+    "ownership": "service-admin-surface-action",
     "receiptSchema": "contracts/v2/module-artifact-receipt.schema.json",
     "surfaceBinding": {
       "page": "modules",
       "section": "modules",
       "action": "publish"
     },
-    "transport": "plugin-sdk.rest.artifact-stream"
+    "transport": "service-sdk.rest.artifact-stream"
   }
 }

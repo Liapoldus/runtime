@@ -1,0 +1,1 @@
+{"id":"runtime","version":"2.0.0","sdkVersion":"service-sdk/v2","protocolVersion":"wool/v3","manifestVersion":"service-runtime/v1","capabilities":[{"id":"runtime.invoke","version":"2.0.0"}],"runtime":{"healthEndpoint":"/healthz"}}

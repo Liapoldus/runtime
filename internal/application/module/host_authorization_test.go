@@ -86,7 +86,7 @@ func TestDomainHostCallsRespectCommandEntityAllowlist(t *testing.T) {
 	}
 }
 
-func TestInvokerRoutesAllowlistedNonDomainPluginCall(t *testing.T) {
+func TestInvokerRoutesAllowlistedNonDomainServiceCall(t *testing.T) {
 	module, err := hex.DecodeString("0061736d01000000010c0260017f017f60027f7f017e03030200010503010001071b03066d656d6f7279020005616c6c6f63000006696e766f6b6500010a1302040041000b0c002001ad4220862000ad840b")
 	if err != nil {
 		t.Fatal(err)
@@ -100,7 +100,7 @@ func TestInvokerRoutesAllowlistedNonDomainPluginCall(t *testing.T) {
 		Modules:       []models.Module{{ID: "app", SHA256: digest(module)}},
 		Commands: []models.Command{{
 			Name: "report", ModuleID: "app", Export: "invoke", Entities: []string{"Entry"},
-			Calls: []models.PluginMethod{{Plugin: "metrics", Method: "metrics.aggregate"}},
+			Calls: []models.ServiceCall{{Service: "metrics", Method: "metrics.aggregate"}},
 		}},
 	}
 	raw, err := json.Marshal(settings)
@@ -111,34 +111,34 @@ func TestInvokerRoutesAllowlistedNonDomainPluginCall(t *testing.T) {
 	if err := store.Activate(context.Background(), "generation-1", "2", digest(raw), raw, map[string][]byte{"app": module}); err != nil {
 		t.Fatal(err)
 	}
-	caller := &recordingPluginCaller{response: json.RawMessage(`{"count":7}`)}
+	caller := &recordingServiceCaller{response: json.RawMessage(`{"count":7}`)}
 	invoker := NewInvokerWithHostCaller(store, caller)
-	invoker.executor = pluginCallExecutor{}
+	invoker.executor = serviceCallExecutor{}
 	output, err := invoker.Invoke(context.Background(), Invocation{Command: "report", Input: json.RawMessage(`{"range":"day"}`)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if caller.plugin != "metrics" || caller.method != "metrics.aggregate" || string(caller.payload) != `{"scope":"daily"}` || string(output) != `{"count":7}` {
+	if caller.service != "metrics" || caller.method != "metrics.aggregate" || string(caller.payload) != `{"scope":"daily"}` || string(output) != `{"count":7}` {
 		t.Fatalf("non-Domain host call was not routed through the allowlist: caller=%#v output=%s", caller, output)
 	}
 }
 
-type recordingPluginCaller struct {
-	plugin   string
+type recordingServiceCaller struct {
+	service   string
 	method   string
 	payload  json.RawMessage
 	response json.RawMessage
 }
 
-func (caller *recordingPluginCaller) Call(_ context.Context, plugin, method string, payload json.RawMessage) (json.RawMessage, error) {
-	caller.plugin, caller.method = plugin, method
+func (caller *recordingServiceCaller) Call(_ context.Context, service, method string, payload json.RawMessage) (json.RawMessage, error) {
+	caller.service, caller.method = service, method
 	caller.payload = append(json.RawMessage(nil), payload...)
 	return append(json.RawMessage(nil), caller.response...), nil
 }
 
-type pluginCallExecutor struct{}
+type serviceCallExecutor struct{}
 
-func (pluginCallExecutor) ExecuteWithHostExport(ctx context.Context, _ []byte, _ string, _ []byte, hostCall wasm.HostCall) ([]byte, error) {
+func (serviceCallExecutor) ExecuteWithHostExport(ctx context.Context, _ []byte, _ string, _ []byte, hostCall wasm.HostCall) ([]byte, error) {
 	return hostCall(ctx, "metrics", "metrics.aggregate", json.RawMessage(`{"scope":"daily"}`))
 }
 

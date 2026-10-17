@@ -24,13 +24,13 @@ var (
 
 // Executor runs one versioned JSON ABI invocation in a new isolated WASM
 // instance. No WASI or host module is registered, so a module cannot access
-// filesystem, network or another plugin through this adapter.
+// filesystem, network or another service through this adapter.
 type Executor struct{}
 
 type HostCall func(context.Context, string, string, json.RawMessage) (json.RawMessage, error)
 
 type hostRequest struct {
-	Plugin  string          `json:"plugin"`
+	Service string          `json:"service"`
 	Method  string          `json:"method"`
 	Payload json.RawMessage `json:"payload"`
 }
@@ -152,11 +152,11 @@ func (Executor) ExecuteWithHostExport(ctx context.Context, moduleBytes []byte, e
 			decoder.DisallowUnknownFields()
 			decodeErr := decoder.Decode(&request)
 			var trailing any
-			if decodeErr != nil || decoder.Decode(&trailing) != io.EOF || request.Plugin == "" || request.Method == "" || len(request.Payload) == 0 || !json.Valid(request.Payload) {
+			if decodeErr != nil || decoder.Decode(&trailing) != io.EOF || request.Service == "" || request.Method == "" || len(request.Payload) == 0 || !json.Valid(request.Payload) {
 				return hostFailure(guest, callCtx, abi.Exports.Allocate, abi.Limits.MaxHostCallBytes)
 			}
 			response := hostResponse{}
-			payload, callErr := hostCall(callCtx, request.Plugin, request.Method, append(json.RawMessage(nil), request.Payload...))
+			payload, callErr := hostCall(callCtx, request.Service, request.Method, append(json.RawMessage(nil), request.Payload...))
 			if callErr != nil {
 				response.Error = "call_failed"
 			} else if len(payload) > abi.Limits.MaxHostCallBytes || !json.Valid(payload) {

@@ -20,19 +20,19 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Liapoldus/plugin-sdk/v2/application"
-	"github.com/Liapoldus/plugin-sdk/v2/domain/interfaces"
-	sdkmodels "github.com/Liapoldus/plugin-sdk/v2/domain/models"
-	"github.com/Liapoldus/plugin-sdk/v2/infrastructure"
-	"github.com/Liapoldus/plugin-sdk/v2/presentation"
-	protocolpeer "github.com/Liapoldus/pluginprotocol/v3/presentation/peer"
 	"github.com/Liapoldus/runtime/contracts"
 	runtimeconfig "github.com/Liapoldus/runtime/internal/application/config"
 	runtimemodule "github.com/Liapoldus/runtime/internal/application/module"
 	"github.com/Liapoldus/runtime/internal/infrastructure/artifacts"
 	"github.com/Liapoldus/runtime/internal/infrastructure/peercaller"
 	"github.com/Liapoldus/runtime/internal/presentation/admin"
-	"github.com/Liapoldus/runtime/internal/presentation/peerplugin"
+	"github.com/Liapoldus/runtime/internal/presentation/peerservice"
+	"github.com/Liapoldus/service-sdk/v2/application"
+	"github.com/Liapoldus/service-sdk/v2/domain/interfaces"
+	sdkmodels "github.com/Liapoldus/service-sdk/v2/domain/models"
+	"github.com/Liapoldus/service-sdk/v2/infrastructure"
+	"github.com/Liapoldus/service-sdk/v2/presentation"
+	protocolpeer "github.com/Liapoldus/wool/v3/presentation/peer"
 )
 
 const (
@@ -89,7 +89,7 @@ func run(arguments []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return errInvalidBootstrap
 	}
-	metadata, err := contracts.PluginDocuments()
+	metadata, err := contracts.RuntimeDocuments()
 	if err != nil {
 		return errInvalidBootstrap
 	}
@@ -286,7 +286,7 @@ func run(arguments []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return infrastructure.ErrInvalidServerTLS
 	}
-	peerHandler, err := peerplugin.New(runtimeInvoker, callerAuthorizer{uri: configuration.peerCaller})
+	peerHandler, err := peerservice.New(runtimeInvoker, callerAuthorizer{uri: configuration.peerCaller})
 	if err != nil {
 		return errInvalidBootstrap
 	}
@@ -330,18 +330,16 @@ func run(arguments []string, stdout, stderr io.Writer) error {
 		AppliedGeneration:   readiness.Generation,
 		Ready:               readiness.Ready && readiness.Generation != "" && runtimeInvoker.Accepting(),
 	}
-	registerContext, registerCancel := context.WithTimeout(serveContext, time.Duration(replicaContract.Deadlines.RegisterSeconds)*time.Second)
-	_, err = replicaClient.Register(registerContext, registration)
-	registerCancel()
-	if err != nil {
-		stop()
-		shutdownContext, shutdownCancel := context.WithTimeout(context.Background(), time.Duration(contract.Deadlines.PluginShutdownGraceSeconds)*time.Second)
-		defer shutdownCancel()
-		return errors.Join(errInvalidBootstrap, server.GracefulShutdown(shutdownContext), peerServer.Close())
-	}
 	leaseResult := make(chan error, 1)
 	go func() {
-		leaseResult <- renewReplicaLease(serveContext, replicaClient, replicaContract, directoryIdentity, lifecycle, runtimeInvoker)
+		leaseResult <- infrastructure.MaintainReplicaLease(serveContext, infrastructure.ReplicaLeaseMaintenance{
+			Client: replicaClient, Registration: registration, Readiness: func() sdkmodels.Readiness {
+				current := lifecycle.Readiness()
+				current.Ready = current.Ready && current.Generation != "" && runtimeInvoker.Accepting()
+				return current
+			},
+			RenewInterval: time.Duration(replicaContract.Lease.RenewIntervalSeconds) * time.Second,
+		})
 	}()
 	if err := writeReady(stdout, listener.Addr().String(), peerServer.Addr()); err != nil {
 		return errors.Join(errInvalidBootstrap, listener.Close(), peerServer.Close())
@@ -362,7 +360,7 @@ func run(arguments []string, stdout, stderr io.Writer) error {
 			stop()
 		}
 	}
-	shutdownContext, cancel := context.WithTimeout(context.Background(), time.Duration(contract.Deadlines.PluginShutdownGraceSeconds)*time.Second)
+	shutdownContext, cancel := context.WithTimeout(context.Background(), time.Duration(contract.Deadlines.ServiceShutdownGraceSeconds)*time.Second)
 	defer cancel()
 	runtimeInvoker.BeginDrain()
 	closeErr := peerServer.Close()
@@ -380,32 +378,6 @@ func run(arguments []string, stdout, stderr io.Writer) error {
 	directoryProvider.Zeroize()
 	credentials.Zeroize()
 	return errors.Join(closeErr, drainErr, deregisterErr, leaseErr, runtimeErr)
-}
-
-func renewReplicaLease(ctx context.Context, client *infrastructure.ReplicaLifecycleClient, contract infrastructure.ReplicaLifecycleContract,
-	identity sdkmodels.PeerReplicaID, lifecycle *application.Lifecycle, invoker *runtimemodule.Invoker) error {
-	ticker := time.NewTicker(time.Duration(contract.Lease.RenewIntervalSeconds) * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-ticker.C:
-			readiness := lifecycle.Readiness()
-			ready := readiness.Ready && readiness.Generation != "" && invoker.Accepting()
-			request := sdkmodels.ReplicaRenewalRequest{
-				ContractVersion: contract.ContractVersion, Identity: identity,
-				AppliedGeneration: readiness.Generation, Ready: ready,
-			}
-			renewContext, cancel := context.WithTimeout(ctx, time.Duration(contract.Deadlines.RenewSeconds)*time.Second)
-			_, err := client.Renew(renewContext, request)
-			cancel()
-			if err != nil {
-				// A failed renewal is never replayed; the supervisor must issue a new incarnation.
-				return errInvalidBootstrap
-			}
-		}
-	}
 }
 
 func executableDigest() (resultDigest string, resultErr error) {
@@ -434,7 +406,7 @@ func parseOptions(arguments []string) (options, error) {
 	var result options
 	flags := flag.NewFlagSet("runtime", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
-	flags.StringVar(&result.listenAddress, "listen", "", "Plugin SDK HTTPS bind address")
+	flags.StringVar(&result.listenAddress, "listen", "", "Service SDK HTTPS bind address")
 	flags.StringVar(&result.coreURL, "core-url", "", "Core control-plane HTTPS origin")
 	flags.StringVar(&result.coreServer, "core-server-name", "", "Core TLS server name")
 	flags.StringVar(&result.instanceID, "instance-id", "", "registered Runtime instance identity")
@@ -481,7 +453,7 @@ func writeReady(writer io.Writer, address, peerAddress string) error {
 }
 
 func mapPresentationContract(contract infrastructure.HTTPContract) (presentation.Contracts, error) {
-	routes := make(map[string]presentation.Endpoint, len(contract.Plugin.Endpoints))
+	routes := make(map[string]presentation.Endpoint, len(contract.Service.Endpoints))
 	for _, name := range contract.EndpointNames() {
 		endpoint, err := contract.Endpoint(name)
 		if err != nil {
@@ -497,7 +469,7 @@ func mapPresentationContract(contract infrastructure.HTTPContract) (presentation
 	for key, problem := range contract.Errors {
 		errorsByKey[key] = presentation.Problem{Status: problem.Status, Code: problem.Code}
 	}
-	plugin := contract.Plugin
+	service := contract.Service
 	mapDocument := func(document infrastructure.DocumentContract) presentation.DocumentContract {
 		return presentation.DocumentContract{
 			MediaType: document.MediaType, MaximumBytes: document.MaximumBytes,
@@ -512,59 +484,59 @@ func mapPresentationContract(contract infrastructure.HTTPContract) (presentation
 		ReadyEndpoint: routes["ready"], ReloadEndpoint: routes["reload"],
 		ArtifactStreamEndpoint: routes["artifactStream"], AdminSurfaceEndpoint: routes["adminSurface"],
 		AdminActionEndpoint: routes["adminAction"], MetricsEndpoint: routes["metrics"],
-		HealthStatus: plugin.Responses.Health.Status, HealthBody: plugin.Responses.Health.Body,
-		ContentTypes:          presentation.ContentTypes{JSON: plugin.Responses.ContentTypes.JSON, Metrics: plugin.Responses.ContentTypes.Metrics},
-		ReloadRequest:         mapDocument(plugin.ReloadRequest),
-		ReloadAcknowledgement: mapDocument(plugin.ReloadAcknowledgement),
-		Readiness:             mapDocument(plugin.Readiness), Manifest: mapDocument(plugin.Manifest),
-		ConfigurationSchema: mapDocument(plugin.ConfigurationSchema),
-		AdminSurface:        mapDocument(plugin.AdminSurface),
+		HealthStatus: service.Responses.Health.Status, HealthBody: service.Responses.Health.Body,
+		ContentTypes:          presentation.ContentTypes{JSON: service.Responses.ContentTypes.JSON, Metrics: service.Responses.ContentTypes.Metrics},
+		ReloadRequest:         mapDocument(service.ReloadRequest),
+		ReloadAcknowledgement: mapDocument(service.ReloadAcknowledgement),
+		Readiness:             mapDocument(service.Readiness), Manifest: mapDocument(service.Manifest),
+		ConfigurationSchema: mapDocument(service.ConfigurationSchema),
+		AdminSurface:        mapDocument(service.AdminSurface),
 		Registration: mapDocument(infrastructure.DocumentContract{
 			MediaType:    contract.Identity.Registration.MediaType,
 			MaximumBytes: contract.Identity.Registration.MaximumBytes,
 			Required:     contract.Identity.Registration.Required,
 		}),
 		ArtifactStream: presentation.ArtifactStreamContract{
-			MediaType: plugin.ArtifactStream.MediaType, MetadataMediaType: plugin.ArtifactStream.MetadataMediaType,
-			Parts: plugin.ArtifactStream.Parts, PartOrder: plugin.ArtifactStream.PartOrder,
-			MaximumArtifactBytes:          plugin.ArtifactStream.MaximumArtifactBytes,
-			MinimumArtifactBytes:          plugin.ArtifactStream.MinimumArtifactBytes,
-			MaximumMetadataBytes:          plugin.ArtifactStream.MaximumMetadataBytes,
-			MaximumMultipartOverheadBytes: plugin.ArtifactStream.MaximumMultipartOverheadBytes,
-			MaximumRequestBytes:           plugin.ArtifactStream.MaximumRequestBytes,
-			MaximumReceiptBytes:           plugin.ArtifactStream.MaximumReceiptBytes,
-			AcceptedStatus:                plugin.ArtifactStream.AcceptedStatus,
-			FilenameForwarded:             plugin.ArtifactStream.FilenameForwarded,
+			MediaType: service.ArtifactStream.MediaType, MetadataMediaType: service.ArtifactStream.MetadataMediaType,
+			Parts: service.ArtifactStream.Parts, PartOrder: service.ArtifactStream.PartOrder,
+			MaximumArtifactBytes:          service.ArtifactStream.MaximumArtifactBytes,
+			MinimumArtifactBytes:          service.ArtifactStream.MinimumArtifactBytes,
+			MaximumMetadataBytes:          service.ArtifactStream.MaximumMetadataBytes,
+			MaximumMultipartOverheadBytes: service.ArtifactStream.MaximumMultipartOverheadBytes,
+			MaximumRequestBytes:           service.ArtifactStream.MaximumRequestBytes,
+			MaximumReceiptBytes:           service.ArtifactStream.MaximumReceiptBytes,
+			AcceptedStatus:                service.ArtifactStream.AcceptedStatus,
+			FilenameForwarded:             service.ArtifactStream.FilenameForwarded,
 			Deadline:                      seconds(contract.Deadlines.ArtifactStreamSeconds),
 			InvocationContext: presentation.ArtifactInvocationContract{
-				MaximumBytes: plugin.ArtifactStream.InvocationContext.MaximumBytes,
-				Required:     plugin.ArtifactStream.InvocationContext.Required,
-				Optional:     plugin.ArtifactStream.InvocationContext.Optional,
-				Headers:      plugin.ArtifactStream.InvocationContext.Headers,
+				MaximumBytes: service.ArtifactStream.InvocationContext.MaximumBytes,
+				Required:     service.ArtifactStream.InvocationContext.Required,
+				Optional:     service.ArtifactStream.InvocationContext.Optional,
+				Headers:      service.ArtifactStream.InvocationContext.Headers,
 			},
 		},
 		AdminAction: presentation.AdminActionContract{
-			MediaType:            plugin.AdminAction.MediaType,
-			MaximumRequestBytes:  plugin.AdminAction.MaximumRequestBytes,
-			MaximumResponseBytes: plugin.AdminAction.MaximumResponseBytes,
-			MaximumPageIDBytes:   plugin.AdminAction.MaximumPageIDBytes,
-			MaximumActionIDBytes: plugin.AdminAction.MaximumActionIDBytes,
-			PathSegmentPattern:   plugin.AdminAction.PathSegmentPattern,
+			MediaType:            service.AdminAction.MediaType,
+			MaximumRequestBytes:  service.AdminAction.MaximumRequestBytes,
+			MaximumResponseBytes: service.AdminAction.MaximumResponseBytes,
+			MaximumPageIDBytes:   service.AdminAction.MaximumPageIDBytes,
+			MaximumActionIDBytes: service.AdminAction.MaximumActionIDBytes,
+			PathSegmentPattern:   service.AdminAction.PathSegmentPattern,
 			ResponseStatus: presentation.StatusRangeContract{
-				Minimum: plugin.AdminAction.ResponseStatus.Minimum,
-				Maximum: plugin.AdminAction.ResponseStatus.Maximum,
+				Minimum: service.AdminAction.ResponseStatus.Minimum,
+				Maximum: service.AdminAction.ResponseStatus.Maximum,
 			},
-			Deadline: seconds(plugin.AdminAction.DeadlineSeconds),
+			Deadline: seconds(service.AdminAction.DeadlineSeconds),
 			InvocationContext: presentation.AdminInvocationContract{
-				MaximumBytes:        plugin.AdminAction.InvocationContext.MaximumBytes,
-				UnknownHeaderPrefix: plugin.AdminAction.InvocationContext.UnknownHeaderPrefix,
-				Required:            plugin.AdminAction.InvocationContext.Required,
-				Optional:            plugin.AdminAction.InvocationContext.Optional,
-				Headers:             plugin.AdminAction.InvocationContext.Headers,
+				MaximumBytes:        service.AdminAction.InvocationContext.MaximumBytes,
+				UnknownHeaderPrefix: service.AdminAction.InvocationContext.UnknownHeaderPrefix,
+				Required:            service.AdminAction.InvocationContext.Required,
+				Optional:            service.AdminAction.InvocationContext.Optional,
+				Headers:             service.AdminAction.InvocationContext.Headers,
 			},
 		},
-		MaximumMetadataBytes: plugin.MaximumMetadataBytes,
-		ReadinessDeadline:    seconds(contract.Deadlines.PluginReadinessSeconds),
+		MaximumMetadataBytes: service.MaximumMetadataBytes,
+		ReadinessDeadline:    seconds(contract.Deadlines.ServiceReadinessSeconds),
 		Problems:             problems, Errors: errorsByKey,
 		OutcomeProblems: contract.OutcomeProblems, SuccessOutcomes: contract.SuccessOutcomes,
 	}
@@ -616,7 +588,7 @@ func (provider registrationProvider) Registration(contractVersion string) (sdkmo
 	return provider.lifecycle.Registration(contractVersion)
 }
 
-type metadataProvider struct{ documents contracts.PluginMetadata }
+type metadataProvider struct{ documents contracts.RuntimeMetadata }
 
 func (provider metadataProvider) Manifest(context.Context) ([]byte, error) {
 	return append([]byte(nil), provider.documents.Manifest...), nil
@@ -661,5 +633,5 @@ func (callerAuthorizer) AuthorizeStream(protocolpeer.PeerIdentity, protocolpeer.
 }
 
 var _ interfaces.ConfigurationApplier = configurationApplier{}
-var _ interfaces.PluginMetadata = metadataProvider{}
+var _ interfaces.ServiceMetadata = metadataProvider{}
 var _ presentation.AdminSurfaceProvider = metadataProvider{}

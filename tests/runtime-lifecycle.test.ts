@@ -15,7 +15,7 @@ function exerciseReloadLifecycle() {
   return JSON.parse(output) as unknown;
 }
 
-describe('Runtime Plugin SDK Reload integration', () => {
+describe('Runtime Service SDK Reload integration', () => {
   it('rejects an invalid candidate without replacing active settings, then atomically activates a valid generation', () => {
     expect(exerciseReloadLifecycle()).toEqual({
       initial: { generation: 'runtime-generation-1', pendingGeneration: '', ready: true },

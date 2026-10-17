@@ -34,7 +34,7 @@ type WasmFunctionSignature struct {
 	Results    []string `json:"results"`
 }
 
-type PluginMetadata struct {
+type RuntimeMetadata struct {
 	Manifest            []byte
 	ConfigurationSchema []byte
 	AdminSurface        []byte
@@ -42,7 +42,7 @@ type PluginMetadata struct {
 
 // WasmABIDefinition returns a fresh, typed sandbox contract.
 func WasmABIDefinition() WasmABI {
-	result := WasmABI{Version: 2, InputFormat: "json", OutputFormat: "json", ResultEncoding: "i64:high32=length,low32=pointer", HostModules: []string{"liapoldus.plugin.v2"}}
+	result := WasmABI{Version: 2, InputFormat: "json", OutputFormat: "json", ResultEncoding: "i64:high32=length,low32=pointer", HostModules: []string{"liapoldus.service.v2"}}
 	result.Exports.Memory = "memory"
 	result.Exports.Allocate = "alloc"
 	result.Exports.Invoke = "invoke"

@@ -6,10 +6,10 @@ type Command struct {
 	ModuleID string         `json:"moduleId"`
 	Export   string         `json:"export"`
 	Entities []string       `json:"entities"`
-	Calls    []PluginMethod `json:"calls,omitempty"`
+	Calls    []ServiceCall `json:"calls,omitempty"`
 }
 
-type PluginMethod struct {
-	Plugin string `json:"plugin"`
-	Method string `json:"method"`
+type ServiceCall struct {
+	Service string `json:"service"`
+	Method  string `json:"method"`
 }

@@ -1,4 +1,4 @@
-import manifest from '../contracts/v2/plugin.json';
+import manifest from '../contracts/v2/manifest.json';
 import wasmABI from '../contracts/v2/wasm-abi.json';
 import adminSurface from '../contracts/v2/admin-surface.json';
 import adminSurfaceSchema from '../contracts/v2/admin-surface.schema.json';
@@ -15,7 +15,7 @@ import { describe, expect, it } from 'vitest';
 describe('product contract ownership', () => {
   it('declares runtime.invoke as the single peer capability', () => {
     expect(manifest.capabilities).toEqual([
-      { name: 'runtime.invoke', mode: 'call' },
+      { id: 'runtime.invoke', version: '2.0.0' },
     ]);
   });
 
@@ -27,16 +27,10 @@ describe('product contract ownership', () => {
   });
 
   it('publishes the generic artifact-stream action for immutable WASM modules', () => {
-    expect(manifest.adminSurface).toMatchObject({
-      version: 1,
-      descriptor: 'contracts/v2/admin-surface.json',
-      schema: 'contracts/v2/admin-surface.schema.json',
-      actions: 'contracts/v2/admin-actions.json',
-      actionsSchema: 'contracts/v2/admin-actions.schema.json',
-    });
+    expect(manifest).not.toHaveProperty('adminSurface');
     expect(adminSurface).toMatchObject({
       version: 1,
-      plugin: 'runtime',
+      service: 'runtime',
       requiredCapabilities: ['runtime.modules.list', 'runtime.modules.publish'],
       pages: [{
         id: 'modules',
@@ -56,7 +50,7 @@ describe('product contract ownership', () => {
 
     expect(actions['runtime.modules.publish']).toMatchObject({
       kind: 'artifact-action',
-      transport: 'plugin-sdk.rest.artifact-stream',
+      transport: 'service-sdk.rest.artifact-stream',
       acceptedHttpStatus: 202,
       archiveLimits: { mediaType: 'application/wasm', artifactBytes: wasmABI.limits.maxModuleBytes },
     });

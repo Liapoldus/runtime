@@ -25,7 +25,7 @@
       "type": "object"
     }
   },
-  "$id": "https://liapoldus.github.io/plugins/runtime/admin-actions/v1/schema.json",
+  "$id": "https://liapoldus.github.io/services/runtime/admin-actions/v1/schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
@@ -42,7 +42,7 @@
           "const": "query"
         },
         "ownership": {
-          "const": "plugin-admin-surface-capability"
+          "const": "service-admin-surface-capability"
         },
         "requestSchema": {
           "type": "object"
@@ -151,7 +151,7 @@
           "type": "object"
         },
         "ownership": {
-          "const": "plugin-admin-surface-action"
+          "const": "service-admin-surface-action"
         },
         "receiptSchema": {
           "const": "contracts/v2/module-artifact-receipt.schema.json"
@@ -177,7 +177,7 @@
           "type": "object"
         },
         "transport": {
-          "const": "plugin-sdk.rest.artifact-stream"
+          "const": "service-sdk.rest.artifact-stream"
         }
       },
       "required": [
@@ -200,6 +200,6 @@
     "runtime.modules.list",
     "runtime.modules.publish"
   ],
-  "title": "Runtime plugin Admin Actions v1",
+  "title": "Runtime service Admin Actions v1",
   "type": "object"
 }

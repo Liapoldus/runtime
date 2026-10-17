@@ -80,7 +80,7 @@ func DecodeInvocation(raw []byte) (Invocation, string) {
 type Invoker struct {
 	store       *config.ConfigurationStore
 	executor    wasmExecutor
-	hostCaller  PluginCaller
+	hostCaller  ServiceCaller
 	drainMu     sync.Mutex
 	accepting   bool
 	inFlight    int
@@ -93,10 +93,10 @@ type wasmExecutor interface {
 	ExecuteWithHostExport(context.Context, []byte, string, []byte, wasm.HostCall) ([]byte, error)
 }
 
-// PluginCaller is the only outbound capability exposed to WASM host calls. Its
-// implementation must use Runtime's authenticated generic pluginprotocol
+// ServiceCaller is the only outbound capability exposed to WASM host calls. Its
+// implementation must use Runtime's authenticated generic Wool
 // session and must never retry side-effecting calls.
-type PluginCaller interface {
+type ServiceCaller interface {
 	Call(context.Context, string, string, json.RawMessage) (json.RawMessage, error)
 }
 
@@ -104,7 +104,7 @@ func NewInvoker(store *config.ConfigurationStore) *Invoker {
 	return &Invoker{store: store, executor: wasm.Executor{}, accepting: true, maxInFlight: maxConcurrentInvocations, drained: make(chan struct{})}
 }
 
-func NewInvokerWithHostCaller(store *config.ConfigurationStore, caller PluginCaller) *Invoker {
+func NewInvokerWithHostCaller(store *config.ConfigurationStore, caller ServiceCaller) *Invoker {
 	invoker := NewInvoker(store)
 	invoker.hostCaller = caller
 	return invoker
@@ -133,7 +133,7 @@ func (invoker *Invoker) BeginDrain() {
 }
 
 // WaitForDrain waits for every invocation admitted before BeginDrain to finish.
-// The caller bounds this wait by the Plugin SDK shutdown grace.
+// The caller bounds this wait by the Service SDK shutdown grace.
 func (invoker *Invoker) WaitForDrain(ctx context.Context) error {
 	if invoker == nil || ctx == nil {
 		return ErrInvokeExecutionFailed
@@ -206,14 +206,14 @@ func (invoker *Invoker) Invoke(ctx context.Context, request Invocation) (json.Ra
 		if err != nil {
 			return err
 		}
-		result, err := invoker.executor.ExecuteWithHostExport(ctx, view.Module, command.Export, composed, func(callCtx context.Context, plugin, method string, payload json.RawMessage) (json.RawMessage, error) {
-			if !commandAllowsCall(command, plugin, method) || invoker.hostCaller == nil {
+		result, err := invoker.executor.ExecuteWithHostExport(ctx, view.Module, command.Export, composed, func(callCtx context.Context, service, method string, payload json.RawMessage) (json.RawMessage, error) {
+			if !commandAllowsCall(command, service, method) || invoker.hostCaller == nil {
 				return nil, ErrInvokeForbiddenEntity
 			}
-			if plugin == "domain" && !commandAllowsDomainPayload(command, method, payload) {
+			if service == "domain" && !commandAllowsDomainPayload(command, method, payload) {
 				return nil, ErrInvokeForbiddenEntity
 			}
-			return invoker.hostCaller.Call(callCtx, plugin, method, payload)
+			return invoker.hostCaller.Call(callCtx, service, method, payload)
 		})
 		if err != nil {
 			return err
@@ -248,9 +248,9 @@ func (invoker *Invoker) Invoke(ctx context.Context, request Invocation) (json.Ra
 	return json.RawMessage(output), nil
 }
 
-func commandAllowsCall(command *models.Command, plugin, method string) bool {
+func commandAllowsCall(command *models.Command, service, method string) bool {
 	for _, allowed := range command.Calls {
-		if allowed.Plugin == plugin && allowed.Method == method {
+		if allowed.Service == service && allowed.Method == method {
 			return true
 		}
 	}

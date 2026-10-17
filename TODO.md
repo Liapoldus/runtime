@@ -1,15 +1,22 @@
 # Runtime v2 — production implementation gates
 
 The repository is partway through the approved breaking transition in
-[`docs/site/plugins/runtime.md`](docs/site/plugins/runtime.md). Do not retain a
+[`docs/site/services/runtime.md`](docs/site/services/runtime.md). Do not retain a
 parallel tenant-scope or no-host-call architecture.
+
+## Studio configurator scope — 2026-10-13
+
+Runtime/WASM product configuration is explicitly deferred by
+[`../../studio/plan.md`](../../studio/plan.md). No Runtime editor, ABI, module
+management or product setting changes are part of this goal; keep only required
+shared Service SDK/Wool consumer fixes and their regressions in scope.
 
 ## P0 — contracts and configuration generation
 
 - [x] Re-inventory repository state, consumers, contracts and current CI while
   preserving checkout WIP. Removal map: retired v1 WASM/admin contracts and
   obsolete blocker document are deleted; settings now use the SDK v2 and
-  `pluginprotocol/v3` module paths; Core→SDK→Runtime→Domain and mock-Core
+  `wool/v3` module paths; Core→SDK→Runtime→Domain and mock-Core
   process fixtures cover the remaining consumers. Source searches found no
   live single-module, OwnerGroup, delegated-scope or `domain.*`-only host-call
   path; the remaining tenant/site phrase states that caller context is absent.
@@ -17,9 +24,9 @@ parallel tenant-scope or no-host-call architecture.
   remains open.
 - [x] Define versioned settings with a module catalog `moduleId → digest`,
   commands mapped to `moduleId + export`, per-command entity restrictions and
-  per-command target-plugin/method allowlists. Remove tenant/site scope fields.
+  per-command target-service/method allowlists. Remove tenant/site scope fields.
 - [x] Keep the published settings JSON Schema aligned with generic
-  `plugin.method` validation; do not restrict host-call methods to `domain.*`.
+  `service.method` validation; do not restrict host-call methods to `domain.*`.
   Regression verifies non-Domain methods are admitted while malformed or
   multi-segment method names remain rejected.
 - [x] Validate artifact digests, ABI, configured export existence/signature and
@@ -30,8 +37,8 @@ parallel tenant-scope or no-host-call architecture.
   not snapshot mutable Core links as permanent permission.
 - [x] Atomically activate settings, artifact set, routes and permissions. A
   rejected candidate must leave the entire previous generation active.
-- [x] Migrate composition to the `plugin-sdk/v2` and generic
-  `pluginprotocol/v3` APIs. Independent `GOWORK=off` tests/build now pass using
+- [x] Migrate composition to the `service-sdk/v2` and generic
+  `wool/v3` APIs. Independent `GOWORK=off` tests/build now pass using
   published `v2.0.0`/`v3.0.0` tags without local replacements.
 - [x] Wire SDK replica registration, renewable Core lease and explicit
   deregistration into the Runtime process using the peer certificate URI bound
@@ -56,18 +63,18 @@ parallel tenant-scope or no-host-call architecture.
   This closes local real-Core process acceptance, not hosted OS or full lease-
   failure/cancellation qualification.
 
-## P1 — isolated execution and plugin calls
+## P1 — isolated execution and service calls
 
 - [x] Support multiple immutable content-addressed WASM artifacts in one active
   generation and route each command to its configured module/export.
 - [x] Instantiate fresh WASM execution state per invocation; only immutable
   compiled module caching may cross calls. Bound module count, artifacts, memory,
   input/output, concurrency, execution, host calls and total call chain.
-- [x] Add a versioned host ABI over generic `pluginprotocol` for bounded
+- [x] Add a versioned host ABI over generic `wool` for bounded
   synchronous request/response calls. Enforce the local per-command target/
   method allowlist, host payload bounds, deadlines and cancellation.
 - [x] Connect host calls to the Core peer-directory resolver and authenticated
-  `pluginprotocol` dialer. Each call resolves one authorized target, validates
+  `wool` dialer. Each call resolves one authorized target, validates
   peer-contract compatibility/eligibility, pins the remote mTLS URI identity,
   and does not retry. Runtime publishes its peer endpoint through Core replica
   registration; the real Core directory delivery is verified by the current
@@ -75,7 +82,7 @@ parallel tenant-scope or no-host-call architecture.
 - [x] Verify a real Core→SDK→Runtime→Domain path using Runtime process mTLS
   identity and Domain Core grants. The child-process test proves a Domain write
   is denied without the grant, succeeds after a Core settings generation adds
-  it, and becomes visible to another authenticated plugin. Runtime sends no
+  it, and becomes visible to another authenticated service. Runtime sends no
   tenant/site/group/OwnerGroup context.
 - [x] Add negative end-to-end cases for Runtime command entity/method narrowing
   and Core link deletion. Separate Core grant enforcement remains proven by the
@@ -84,7 +91,7 @@ parallel tenant-scope or no-host-call architecture.
   admission and adversarial fixtures to cover each permitted host capability,
   malformed inputs, reentrancy, cancellation, timeout, trap and resource limits.
 - [x] Never auto-replay side-effecting calls or unknown outcomes. No distributed
-  transaction across plugins; expose typed partial/unknown outcome to the caller.
+  transaction across services; expose typed partial/unknown outcome to the caller.
 
 ## P2 — quality, integration and release gates
 
@@ -100,24 +107,24 @@ parallel tenant-scope or no-host-call architecture.
   starts from its initial state. Remaining adversarial and config-generation
   concurrency cases are still open.
 - [x] Add Go-native tests for multi-module settings/generation, per-command host
-  authorization and the actual versioned WASM host import. The full cross-plugin
+  authorization and the actual versioned WASM host import. The full cross-service
   and isolation acceptance set remains open below.
 - [x] Add real Core→SDK→Runtime→Domain process E2E for Core exact-generation
   config, directory eligibility, allowlisted WASM host calls, Runtime identity,
   Domain grant deny/allow, Runtime entity/method narrowing and Core link deletion.
-- [x] Add mock-plugin conformance coverage at the host ABI and invoker boundaries:
-  the WASM host import preserves a non-Domain plugin/method/payload, and the
+- [x] Add mock-service conformance coverage at the host ABI and invoker boundaries:
+  the WASM host import preserves a non-Domain service/method/payload, and the
   invoker routes a configured non-Domain call only through its command allowlist.
 - [x] Exercise lease-renewal refusal in the Runtime child process against an
   mTLS Core lifecycle fixture using the contract's real 10-second renewal
   cadence. Runtime exits fail-closed and explicitly deregisters its incarnation.
 - [x] Cancel an admitted Runtime peer-caller operation over an actual mTLS
-  `pluginprotocol` session to a mock plugin; assert cancellation reaches the
+  `wool` session to a mock service; assert cancellation reaches the
   remote handler and the call count remains one.
 - [x] Add a child-process cancellation acceptance for an in-flight Runtime→
-  plugin host call. The real Runtime executable is configured from a Core-
-  format mTLS peer directory, calls a mock metrics plugin over authenticated
-  `pluginprotocol`, then receives cancellation from the invoking caller; the
+  service host call. The real Runtime executable is configured from a Core-
+  format mTLS peer directory, calls a mock metrics service over authenticated
+  `wool`, then receives cancellation from the invoking caller; the
   remote handler observes cancellation and its delivery count remains one.
   Generation rejection/recovery and real Core restart/reconnect are also
   covered cross-repository. Artifact upload uses the SDK streaming action in
@@ -130,7 +137,7 @@ parallel tenant-scope or no-host-call architecture.
   diagnose the prior transient host-call refusal. Runtime now emits a bounded,
   closed `stage` diagnostic without peer addresses, identities, payloads or raw
   transport errors. The failure was `no_ready_peer`: Core's eligible directory
-  lease lagged plugin-local readiness. The Core fixture now waits for published
+  lease lagged service-local readiness. The Core fixture now waits for published
   route eligibility, builds its race-instrumented peer client once, and keeps
   the finite drain loop inside the ABI deadline. Two consecutive complete
   `GOFLAGS=-race` process runs passed; additional platform and lease-failure
@@ -204,7 +211,7 @@ prebuilt peer client for bounded polling.
 
 The generic host-call path now has a paired non-Domain conformance regression:
 the actual WASM host import preserves a `metrics.aggregate` call, and the
-Invoker forwards a non-Domain target only when that exact plugin/method pair is
+Invoker forwards a non-Domain target only when that exact service/method pair is
 present in the active command allowlist. Targeted Go and race tests pass. A new
 Runtime lifecycle process scenario also makes the mTLS Core fixture refuse the
 next lease renewal; Runtime exits fail-closed and deregisters its incarnation.
@@ -214,12 +221,12 @@ Runtime `make check` using bundled Node: generated contracts, golangci-lint
 runs and outstanding production resource gates remain open.
 
 Peer-caller cancellation now has a race-tested regression: cancellation reaches
-the in-flight plugin session and the side-effecting call is not retried. The
+the in-flight service session and the side-effecting call is not retried. The
 Runtime lifecycle child-process scenario passes under `GOFLAGS=-race` while the
 mTLS Core fixture refuses renewal, observes fail-closed process exit and
 deregistration, and preserves the active-generation lifecycle assertions.
-An additional real mTLS `pluginprotocol` test cancels the caller while a mock
-plugin handler is running, confirms the remote handler observes cancellation,
+An additional real mTLS `wool` test cancels the caller while a mock
+service handler is running, confirms the remote handler observes cancellation,
 and confirms one delivery. The full Runtime `make check` passes again on this
 tree after those regressions. Cancellation through a full Runtime child process
 was not covered by those earlier tests; the child-process gate is now closed as
@@ -227,7 +234,7 @@ recorded above.
 
 That process-level gate is now closed locally: `tests/peer-invoke.test.ts`
 drives the Runtime child through a Core-format mTLS directory response and a
-real authenticated `pluginprotocol` mock handler. Cancelling the inbound
+real authenticated `wool` mock handler. Cancelling the inbound
 `runtime.invoke` cancels the remote handler and leaves its delivery count at
 one. The focused child-process test passes (12 cases), and the fixture also
 passes under `GOFLAGS=-race`. This is mock-Core/local acceptance, not hosted OS
@@ -235,8 +242,8 @@ qualification or the real-Core Domain grant scenario.
 
 The generated Runtime settings schema previously constrained every configured
 host-call method to `domain.*`, despite Go validation and the host ABI supporting
-generic plugin methods. A code-owned schema regression reproduced the mismatch;
-the schema now accepts bounded `plugin.method` identifiers for any plugin and
+generic service methods. A code-owned schema regression reproduced the mismatch;
+the schema now accepts bounded `service.method` identifiers for any service and
 the generated v2 artifact is synchronized. Full Runtime `make check` passes
 after the fix (generated-contract check, golangci-lint, ESLint, typecheck, 43
 Vitest tests at that checkpoint, Go tests, vet and build). Hosted OS qualification remains open.
@@ -248,7 +255,7 @@ golangci-lint issues, ESLint, typecheck, Go tests, vet and build. The focused
 `GOFLAGS=-race`; full `make check-race` also passes with 44 tests. Race mode
 exposed that a shutdown test inferred admission from CPU-loop duration. Replace
 that timing assumption with a deterministic barrier: the Runtime fixture holds
-an actual authenticated mTLS `pluginprotocol` host call at a mock handler,
+an actual authenticated mTLS `wool` host call at a mock handler,
 signals shutdown only after the call is admitted, verifies new calls are
 refused, then releases the admitted call and verifies graceful completion. The
 fixture no longer contains the unused finite CPU-loop generator. `make check`

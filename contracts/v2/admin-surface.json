@@ -4,7 +4,7 @@
       "capability": "runtime.modules.list",
       "id": "modules",
       "permissions": [
-        "plugins.runtime.modules.manage"
+        "services.runtime.modules.manage"
       ],
       "sections": [
         {
@@ -51,10 +51,10 @@
       "title": "WASM-модули"
     }
   ],
-  "plugin": "runtime",
   "requiredCapabilities": [
     "runtime.modules.list",
     "runtime.modules.publish"
   ],
+  "service": "runtime",
   "version": 1
 }

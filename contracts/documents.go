@@ -3,6 +3,8 @@ package contracts
 import (
 	"encoding/json"
 	"fmt"
+
+	sdkmodels "github.com/Liapoldus/service-sdk/v2/domain/models"
 	"github.com/Liapoldus/runtime/contracts/schema"
 )
 
@@ -10,7 +12,7 @@ import (
 func Documents() map[string]any {
 	actions := ModuleAdminActionDefinitions()
 	list := map[string]any{
-		"ownership": "plugin-admin-surface-capability",
+		"ownership": "service-admin-surface-capability",
 		"requestSchema": map[string]any{
 			"$schema":              "https://json-schema.org/draft/2020-12/schema",
 			"type":                 "object",
@@ -55,8 +57,8 @@ func Documents() map[string]any {
 		},
 	}
 	publish := map[string]any{
-		"ownership": "plugin-admin-surface-action",
-		"transport": "plugin-sdk.rest.artifact-stream",
+		"ownership": "service-admin-surface-action",
+		"transport": "service-sdk.rest.artifact-stream",
 		"multipart": map[string]any{
 			"parts": []any{
 				"metadata",
@@ -73,7 +75,7 @@ func Documents() map[string]any {
 		"idempotency": map[string]any{
 			"required": true,
 			"scope": []any{
-				"plugin-instance",
+				"service-instance",
 				"capability",
 				"idempotency-key",
 			},
@@ -99,7 +101,7 @@ func Documents() map[string]any {
 		"admin-actions.schema.json":           schema.Actions(),
 		"admin-surface.json": map[string]any{
 			"version": 1,
-			"plugin":  "runtime",
+			"service": "runtime",
 			"requiredCapabilities": []any{
 				"runtime.modules.list",
 				"runtime.modules.publish",
@@ -110,7 +112,7 @@ func Documents() map[string]any {
 					"title":      "WASM-модули",
 					"capability": "runtime.modules.list",
 					"permissions": []any{
-						"plugins.runtime.modules.manage",
+						"services.runtime.modules.manage",
 					},
 					"sections": []any{
 						map[string]any{
@@ -158,26 +160,7 @@ func Documents() map[string]any {
 			},
 		},
 		"admin-surface.schema.json": schema.Surface(),
-		"plugin.json": map[string]any{
-			"name": "runtime",
-			"configuration": map[string]any{
-				"schemaVersion": "2",
-				"schema":        "contracts/v2/settings.schema.json",
-			},
-			"adminSurface": map[string]any{
-				"version":       1,
-				"descriptor":    "contracts/v2/admin-surface.json",
-				"schema":        "contracts/v2/admin-surface.schema.json",
-				"actions":       "contracts/v2/admin-actions.json",
-				"actionsSchema": "contracts/v2/admin-actions.schema.json",
-			},
-			"capabilities": []any{
-				map[string]any{
-					"name": "runtime.invoke",
-					"mode": "call",
-				},
-			},
-		},
+		"manifest.json":                       runtimeManifestDescriptor(),
 		"invoke-success.schema.json": schema.Success(),
 		"wasm-errors.json": map[string]any{
 			"version": 2,
@@ -200,6 +183,9 @@ func Document(name string) ([]byte, error) {
 	if !ok {
 		return nil, fmt.Errorf("unknown contract: %s", name)
 	}
+	if name == "manifest.json" {
+		return sdkmodels.CanonicalManifest(runtimeManifestDescriptor())
+	}
 	data, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		return nil, err
@@ -207,18 +193,25 @@ func Document(name string) ([]byte, error) {
 	return append(data, '\n'), nil
 }
 
-func PluginDocuments() (PluginMetadata, error) {
-	manifest, err := Document("plugin.json")
+func RuntimeDocuments() (RuntimeMetadata, error) {
+	manifest, err := Document("manifest.json")
 	if err != nil {
-		return PluginMetadata{}, err
+		return RuntimeMetadata{}, err
 	}
 	schema, err := Document("settings.schema.json")
 	if err != nil {
-		return PluginMetadata{}, err
+		return RuntimeMetadata{}, err
 	}
 	surface, err := Document("admin-surface.json")
 	if err != nil {
-		return PluginMetadata{}, err
+		return RuntimeMetadata{}, err
 	}
-	return PluginMetadata{Manifest: manifest, ConfigurationSchema: schema, AdminSurface: surface}, nil
+	return RuntimeMetadata{Manifest: manifest, ConfigurationSchema: schema, AdminSurface: surface}, nil
+}
+
+func runtimeManifestDescriptor() sdkmodels.ManifestDescriptor {
+	return sdkmodels.ManifestDescriptor{
+		ID: "runtime", Version: "2.0.0",
+		Capabilities: []sdkmodels.CapabilityDescriptor{{ID: "runtime.invoke", Version: "2.0.0"}},
+	}
 }

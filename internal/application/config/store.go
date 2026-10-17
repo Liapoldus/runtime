@@ -133,7 +133,7 @@ func (store *ConfigurationStore) WithCommand(name string, use func(CommandView) 
 		}
 		command := configured
 		command.Entities = append([]string(nil), configured.Entities...)
-		command.Calls = append([]models.PluginMethod(nil), configured.Calls...)
+		command.Calls = append([]models.ServiceCall(nil), configured.Calls...)
 		module := active.Modules[command.ModuleID]
 		if len(module) == 0 {
 			return true, ErrConfigurationRejected

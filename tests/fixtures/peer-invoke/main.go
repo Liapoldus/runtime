@@ -29,9 +29,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	sdkmodels "github.com/Liapoldus/plugin-sdk/v2/domain/models"
-	"github.com/Liapoldus/plugin-sdk/v2/infrastructure"
-	protocolpeer "github.com/Liapoldus/pluginprotocol/v3/presentation/peer"
+	sdkmodels "github.com/Liapoldus/service-sdk/v2/domain/models"
+	"github.com/Liapoldus/service-sdk/v2/infrastructure"
+	protocolpeer "github.com/Liapoldus/wool/v3/presentation/peer"
 	"github.com/Liapoldus/runtime/contracts"
 	"github.com/Liapoldus/runtime/internal/infrastructure/artifacts"
 	"github.com/Liapoldus/runtime/tests/fixtures/lifecyclecore"
@@ -43,10 +43,10 @@ const (
 	instanceID           = "runtime-invoke-e2e"
 	replicaID            = "runtime-invoke-e2e-1"
 	coreCN               = "runtime-invoke-core"
-	runtimeCN            = "runtime-invoke-plugin"
+	runtimeCN            = "runtime-invoke-service"
 	callerCN             = "runtime-invoke-caller"
 	outsiderCN           = "runtime-invoke-outsider"
-	runtimePeerURI       = "spiffe://liapoldus/plugin/runtime-invoke-e2e/runtime-invoke-e2e-1/inc-runtime"
+	runtimePeerURI       = "spiffe://liapoldus/service/runtime-invoke-e2e/runtime-invoke-e2e-1/inc-runtime"
 	placementID          = "node-runtime"
 	incarnationID        = "inc-runtime"
 	callerPeerURI        = "spiffe://liapoldus.test/server"
@@ -55,7 +55,7 @@ const (
 	metricsReplicaID     = "metrics-main-1"
 	metricsIncarnationID = "inc-metrics"
 	metricsPlacementID   = "node-metrics"
-	metricsPeerURI       = "spiffe://liapoldus/plugin/metrics-main/metrics-main-1/inc-metrics"
+	metricsPeerURI       = "spiffe://liapoldus/service/metrics-main/metrics-main-1/inc-metrics"
 	schemaVersion        = "2"
 )
 
@@ -139,7 +139,7 @@ func hostCallWasm(payload []byte) []byte {
 	module := []byte{0, 'a', 's', 'm', 1, 0, 0, 0}
 	module = section(module, 1, []byte{2, 0x60, 1, 0x7f, 1, 0x7f, 0x60, 2, 0x7f, 0x7f, 1, 0x7e})
 	imports := []byte{1}
-	imports = append(imports, name("liapoldus.plugin.v2")...)
+	imports = append(imports, name("liapoldus.service.v2")...)
 	imports = append(imports, name("call")...)
 	imports = append(imports, 0, 1)
 	module = section(module, 2, imports)
@@ -239,13 +239,13 @@ func run() error {
 		return errScenario
 	}
 	hostPayload, err := json.Marshal(map[string]any{
-		"plugin": metricsInstanceID, "method": "metrics.aggregate", "payload": map[string]string{"window": "daily"},
+		"service": metricsInstanceID, "method": "metrics.aggregate", "payload": map[string]string{"window": "daily"},
 	})
 	if err != nil {
 		return errScenario
 	}
 	drainHostPayload, err := json.Marshal(map[string]any{
-		"plugin": metricsInstanceID, "method": "metrics.aggregate", "payload": map[string]string{"window": "drain"},
+		"service": metricsInstanceID, "method": "metrics.aggregate", "payload": map[string]string{"window": "drain"},
 	})
 	if err != nil {
 		return errScenario
@@ -254,7 +254,7 @@ func run() error {
 	drainHostModule := hostCallWasm(drainHostPayload)
 	echoDigest, slowDigest := sdkmodels.Digest(echo), sdkmodels.Digest(slow)
 	hostDigest, drainHostDigest := sdkmodels.Digest(hostModule), sdkmodels.Digest(drainHostModule)
-	metadata, err := contracts.PluginDocuments()
+	metadata, err := contracts.RuntimeDocuments()
 	if err != nil {
 		return errScenario
 	}
@@ -339,7 +339,7 @@ func run() error {
 		Handler:  probeHandler, Limits: protocolpeer.DefaultLimits(),
 	})
 	if err != nil {
-		return fmt.Errorf("mock plugin mTLS probe failed: %w", err)
+		return fmt.Errorf("mock service mTLS probe failed: %w", err)
 	}
 	if err := probe.Close(); err != nil {
 		return errScenario
@@ -520,7 +520,7 @@ func run() error {
 		return errScenario
 	}
 	defer transport.CloseIdleConnections()
-	client, err := infrastructure.NewPluginClient(contract, "https://"+address.ListenAddress, transport, peer)
+	client, err := infrastructure.NewServiceClient(contract, "https://"+address.ListenAddress, transport, peer)
 	if err != nil {
 		return errScenario
 	}
@@ -602,7 +602,7 @@ func run() error {
 	case <-remoteStarted:
 	case <-time.After(5 * time.Second):
 		cancelHostCall()
-		return errors.New("runtime child process did not reach the mock plugin host handler")
+		return errors.New("runtime child process did not reach the mock service host handler")
 	}
 	cancelHostCall()
 	select {
@@ -614,7 +614,7 @@ func run() error {
 	case <-remoteCancelled:
 		late.HostCallCancelled.RemoteHandlerObservedCancel = true
 	case <-time.After(5 * time.Second):
-		return errors.New("runtime child cancellation did not reach the remote plugin handler")
+		return errors.New("runtime child cancellation did not reach the remote service handler")
 	}
 	late.HostCallCancelled.DeliveryCount = remoteDeliveries.Load()
 
@@ -905,11 +905,11 @@ func configurationDocument(_ string, moduleDigest, commandName string) string {
 }
 
 func hostCallConfigurationDocument(moduleDigest string) string {
-	return fmt.Sprintf(`{"schemaVersion":"2","modules":[{"moduleId":"app","sha256":%q}],"commands":[{"name":"hostcall","moduleId":"app","export":"invoke","entities":["entity1"],"calls":[{"plugin":%q,"method":"metrics.aggregate"}]}]}`, moduleDigest, metricsInstanceID)
+	return fmt.Sprintf(`{"schemaVersion":"2","modules":[{"moduleId":"app","sha256":%q}],"commands":[{"name":"hostcall","moduleId":"app","export":"invoke","entities":["entity1"],"calls":[{"service":%q,"method":"metrics.aggregate"}]}]}`, moduleDigest, metricsInstanceID)
 }
 
 func drainHostConfigurationDocument(moduleDigest string) string {
-	return fmt.Sprintf(`{"schemaVersion":"2","modules":[{"moduleId":"app","sha256":%q}],"commands":[{"name":"drain","moduleId":"app","export":"invoke","entities":["entity1"],"calls":[{"plugin":%q,"method":"metrics.aggregate"}]}]}`, moduleDigest, metricsInstanceID)
+	return fmt.Sprintf(`{"schemaVersion":"2","modules":[{"moduleId":"app","sha256":%q}],"commands":[{"name":"drain","moduleId":"app","export":"invoke","entities":["entity1"],"calls":[{"service":%q,"method":"metrics.aggregate"}]}]}`, moduleDigest, metricsInstanceID)
 }
 
 type testCredentials struct {
@@ -992,7 +992,7 @@ func issueTestCredentials(directory string) (testCredentials, error) {
 		{runtimeCN, runtimePeerURI, paths.runtimePeerCert, paths.runtimePeerKey},
 		{callerCN, callerPeerURI, paths.callerPeerCert, paths.callerPeerKey},
 		{outsiderCN, outsiderURI, paths.outsiderPeerCert, paths.outsiderPeerKey},
-		{"metrics-plugin", metricsPeerURI, paths.metricsPeerCert, paths.metricsPeerKey},
+		{"metrics-service", metricsPeerURI, paths.metricsPeerCert, paths.metricsPeerKey},
 	} {
 		if err := issuePeerLeaf(now, root, rootKey, int64(index+10), pair.cn, pair.uri, pair.cert, pair.key); err != nil {
 			return testCredentials{}, errScenario

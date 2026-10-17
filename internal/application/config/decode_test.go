@@ -14,7 +14,7 @@ func validConfiguration() models.Configuration {
 		SchemaVersion: "2",
 		Modules:       []models.Module{{ID: "forms", SHA256: strings.Repeat("a", 64)}, {ID: "notify", SHA256: strings.Repeat("b", 64)}},
 		Commands: []models.Command{
-			{Name: "submit", ModuleID: "forms", Export: "invoke", Entities: []string{"entries"}, Calls: []models.PluginMethod{{Plugin: "domain", Method: "domain.query"}}},
+			{Name: "submit", ModuleID: "forms", Export: "invoke", Entities: []string{"entries"}, Calls: []models.ServiceCall{{Service: "domain", Method: "domain.query"}}},
 			{Name: "alert", ModuleID: "notify", Export: "invoke", Entities: []string{"notifications"}},
 		},
 	}
@@ -34,7 +34,7 @@ func TestDecodeConfigurationRejectsOldScopeAndSingleModuleShapes(t *testing.T) {
 		{"unknown module route", func(c *models.Configuration) { c.Commands[0].ModuleID = "missing" }, "invalid_command"},
 		{"invalid export", func(c *models.Configuration) { c.Commands[0].Export = "invoke-now" }, "invalid_command"},
 		{"duplicate command", func(c *models.Configuration) { c.Commands = append(c.Commands, c.Commands[0]) }, "duplicate_command"},
-		{"duplicate plugin method", func(c *models.Configuration) {
+		{"duplicate service method", func(c *models.Configuration) {
 			c.Commands[0].Calls = append(c.Commands[0].Calls, c.Commands[0].Calls[0])
 		}, "invalid_command"},
 		{"malformed method", func(c *models.Configuration) { c.Commands[0].Calls[0].Method = "domain..query" }, "invalid_command"},
@@ -43,7 +43,7 @@ func TestDecodeConfigurationRejectsOldScopeAndSingleModuleShapes(t *testing.T) {
 			candidate := valid
 			candidate.Modules = append([]models.Module(nil), valid.Modules...)
 			candidate.Commands = append([]models.Command(nil), valid.Commands...)
-			candidate.Commands[0].Calls = append([]models.PluginMethod(nil), valid.Commands[0].Calls...)
+			candidate.Commands[0].Calls = append([]models.ServiceCall(nil), valid.Commands[0].Calls...)
 			test.change(&candidate)
 			raw, err := json.Marshal(candidate)
 			if err != nil {
@@ -63,5 +63,16 @@ func TestDecodeConfigurationRejectsOldScopeAndSingleModuleShapes(t *testing.T) {
 		if _, code := config.DecodeConfiguration([]byte(input)); code != "invalid_configuration" {
 			t.Fatalf("unexpected result: %s", code)
 		}
+	}
+}
+
+func TestDecodeConfigurationUsesServiceTargetWithoutChangingIDsOrMethods(t *testing.T) {
+	raw := []byte(`{"schemaVersion":"2","modules":[{"moduleId":"forms","sha256":"` + strings.Repeat("a", 64) + `"}],"commands":[{"name":"submit","moduleId":"forms","export":"invoke","entities":["entries"],"calls":[{"service":"domain","method":"domain.query"}]}]}`)
+	if _, code := config.DecodeConfiguration(raw); code != "" {
+		t.Fatalf("service target with existing ID and method was rejected: %s", code)
+	}
+	legacy := strings.Replace(string(raw), `"service"`, `"plugin"`, 1)
+	if _, code := config.DecodeConfiguration([]byte(legacy)); code == "" {
+		t.Fatal("legacy plugin target field remains accepted")
 	}
 }

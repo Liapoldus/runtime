@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Liapoldus/plugin-sdk/v2/domain/models"
-	"github.com/Liapoldus/plugin-sdk/v2/infrastructure"
+	"github.com/Liapoldus/service-sdk/v2/domain/models"
+	"github.com/Liapoldus/service-sdk/v2/infrastructure"
 )
 
 // Core is a small mTLS fixture endpoint for the SDK replica lifecycle contract.
@@ -24,8 +24,8 @@ func New(contract infrastructure.ReplicaLifecycleContract) *Core {
 	return &Core{contract: contract, active: make(map[models.PeerReplicaID]models.ReplicaRegistrationRequest)}
 }
 
-// RefuseRenewals simulates a Core lifecycle refusal after a replica has started.
-func (core *Core) RefuseRenewals() {
+// RejectRenewals simulates a terminal Core identity conflict after a replica starts.
+func (core *Core) RejectRenewals() {
 	core.mu.Lock()
 	defer core.mu.Unlock()
 	core.failRenew = true
@@ -72,7 +72,7 @@ func (core *Core) handle(operation string) http.HandlerFunc {
 			core.mu.Lock()
 			if core.failRenew {
 				core.mu.Unlock()
-				problem := core.contract.Problems["unavailable"]
+				problem := core.contract.Problems["identityConflict"]
 				writer.Header().Set("Content-Type", core.contract.ProblemMediaType)
 				writeJSON(writer, problem.Status, map[string]string{"code": problem.Code})
 				return

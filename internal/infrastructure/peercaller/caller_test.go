@@ -17,10 +17,10 @@ import (
 	"testing"
 	"time"
 
-	sdkinterfaces "github.com/Liapoldus/plugin-sdk/v2/domain/interfaces"
-	sdkmodels "github.com/Liapoldus/plugin-sdk/v2/domain/models"
-	sdkinfrastructure "github.com/Liapoldus/plugin-sdk/v2/infrastructure"
-	protocolpeer "github.com/Liapoldus/pluginprotocol/v3/presentation/peer"
+	sdkinterfaces "github.com/Liapoldus/service-sdk/v2/domain/interfaces"
+	sdkmodels "github.com/Liapoldus/service-sdk/v2/domain/models"
+	sdkinfrastructure "github.com/Liapoldus/service-sdk/v2/infrastructure"
+	protocolpeer "github.com/Liapoldus/wool/v3/presentation/peer"
 )
 
 func TestCallResolvesAuthorizedCoreLinkAndDoesNotRetry(t *testing.T) {
@@ -48,15 +48,15 @@ func TestCallResolvesAuthorizedCoreLinkAndDoesNotRetry(t *testing.T) {
 	if err := directory.Validate(); err != nil {
 		t.Fatalf("test directory invalid: %v", err)
 	}
-	remoteURI := "spiffe://liapoldus/plugin/domain-main/domain-1/inc-domain"
+	remoteURI := "spiffe://liapoldus/service/domain-main/domain-1/inc-domain"
 	session := &fakeSession{peer: protocolpeer.PeerIdentity{URI: remoteURI}, result: protocolpeer.Result{Payload: []byte(`{"ok":true,"data":{"id":"x"}}`)}}
 	dialer := &fakeDialer{session: session}
 	var pollContract sdkinfrastructure.PeerDirectoryPollContract
-	pollContract.Identity.URITemplate = "spiffe://liapoldus/plugin/{instanceId}/{replicaId}/{incarnationId}"
+	pollContract.Identity.URITemplate = "spiffe://liapoldus/service/{instanceId}/{replicaId}/{incarnationId}"
 	caller := &Caller{
 		directory: directoryStub{directory: directory},
 		contract:  pollContract,
-		identity:  local, localURI: "spiffe://liapoldus/plugin/runtime-main/runtime-1/inc-runtime",
+		identity:  local, localURI: "spiffe://liapoldus/service/runtime-main/runtime-1/inc-runtime",
 		certificate: tls.Certificate{Certificate: [][]byte{{1}}}, roots: x509.NewCertPool(), dialer: dialer,
 		logger: testLogger{},
 	}
@@ -75,7 +75,7 @@ func TestCallResolvesAuthorizedCoreLinkAndDoesNotRetry(t *testing.T) {
 	callContext, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 	if _, err := caller.Call(callContext, target.InstanceID, "domain.get", json.RawMessage(`{"entity":"Entry","id":"x"}`)); err == nil {
-		t.Fatal("cancelled plugin call unexpectedly succeeded")
+		t.Fatal("cancelled service call unexpectedly succeeded")
 	}
 	if dialer.calls != 2 || session.calls != 2 || session.closed != 2 {
 		t.Fatalf("cancelled call was retried or session leaked: dial/call/close=%d/%d/%d", dialer.calls, session.calls, session.closed)
@@ -89,12 +89,12 @@ func TestCallFailsClosedWithoutCoreAuthorizedTarget(t *testing.T) {
 	}
 }
 
-func TestCallCancelsInFlightAuthenticatedPluginProtocolRequestWithoutRetry(t *testing.T) {
+func TestCallCancelsInFlightAuthenticatedWoolRequestWithoutRetry(t *testing.T) {
 	now := time.Now().UTC()
 	local := sdkmodels.PeerReplicaID{InstanceID: "runtime-main", ReplicaID: "runtime-1", IncarnationID: "inc-runtime", PlacementID: "node-a"}
 	target := sdkmodels.PeerReplicaID{InstanceID: "metrics-main", ReplicaID: "metrics-1", IncarnationID: "inc-metrics", PlacementID: "node-b"}
-	localURI := "spiffe://liapoldus.test/plugins/runtime/replica/runtime-1/incarnation/inc-runtime"
-	targetURI := "spiffe://liapoldus.test/plugins/metrics-main/replica/metrics-1/incarnation/inc-metrics"
+	localURI := "spiffe://liapoldus.test/services/runtime/replica/runtime-1/incarnation/inc-runtime"
+	targetURI := "spiffe://liapoldus.test/services/metrics-main/replica/metrics-1/incarnation/inc-metrics"
 	localCertificate, targetCertificate, roots := testPeerCertificates(t, localURI, targetURI)
 	started := make(chan struct{})
 	serverCancelled := make(chan struct{})
@@ -124,7 +124,7 @@ func TestCallCancelsInFlightAuthenticatedPluginProtocolRequestWithoutRetry(t *te
 	t.Cleanup(func() {
 		stopServing()
 		if err := server.Close(); err != nil {
-			t.Errorf("close mock plugin server: %v", err)
+			t.Errorf("close mock service server: %v", err)
 		}
 		<-serveDone
 	})
@@ -138,7 +138,7 @@ func TestCallCancelsInFlightAuthenticatedPluginProtocolRequestWithoutRetry(t *te
 		Handler:  clientHandler, Limits: protocolpeer.Limits{MaxMessageBytes: 256 << 10, MaxConcurrentCalls: 1},
 	})
 	if err != nil {
-		t.Fatalf("direct authenticated mock plugin dial failed: %v", err)
+		t.Fatalf("direct authenticated mock service dial failed: %v", err)
 	}
 	if err := probe.Close(); err != nil {
 		t.Fatal(err)
@@ -165,7 +165,7 @@ func TestCallCancelsInFlightAuthenticatedPluginProtocolRequestWithoutRetry(t *te
 		t.Fatalf("mock Core directory is invalid: %v", err)
 	}
 	var contract sdkinfrastructure.PeerDirectoryPollContract
-	contract.Identity.URITemplate = "spiffe://liapoldus.test/plugins/{instanceId}/replica/{replicaId}/incarnation/{incarnationId}"
+	contract.Identity.URITemplate = "spiffe://liapoldus.test/services/{instanceId}/replica/{replicaId}/incarnation/{incarnationId}"
 	logger := &capturedLogger{}
 	caller := &Caller{
 		directory: directoryStub{directory: directory}, contract: contract, identity: local, localURI: localURI,
@@ -181,13 +181,13 @@ func TestCallCancelsInFlightAuthenticatedPluginProtocolRequestWithoutRetry(t *te
 	case <-started:
 	case <-time.After(2 * time.Second):
 		cancel()
-		t.Fatalf("mock plugin did not admit the authenticated host call (stage: %#v)", logger.fields)
+		t.Fatalf("mock service did not admit the authenticated host call (stage: %#v)", logger.fields)
 	}
 	cancel()
 	select {
 	case callErr := <-callDone:
 		if callErr == nil {
-			t.Fatal("in-flight mock plugin call succeeded after its caller cancelled")
+			t.Fatal("in-flight mock service call succeeded after its caller cancelled")
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("caller cancellation did not interrupt the in-flight peer session")
@@ -195,10 +195,10 @@ func TestCallCancelsInFlightAuthenticatedPluginProtocolRequestWithoutRetry(t *te
 	select {
 	case <-serverCancelled:
 	case <-time.After(2 * time.Second):
-		t.Fatal("cancellation did not reach the mock plugin handler")
+		t.Fatal("cancellation did not reach the mock service handler")
 	}
 	if got := handled.Load(); got != 1 {
-		t.Fatalf("side-effecting plugin method was replayed: handled %d times", got)
+		t.Fatalf("side-effecting service method was replayed: handled %d times", got)
 	}
 }
 
@@ -256,7 +256,7 @@ func testPeerCertificates(t *testing.T, clientURI, serverURI string) (tls.Certif
 	}
 	roots := x509.NewCertPool()
 	roots.AddCert(root)
-	return issue("runtime-client", clientURI), issue("metrics-plugin", serverURI), roots
+	return issue("runtime-client", clientURI), issue("metrics-service", serverURI), roots
 }
 
 func TestCallLogsOnlyAClosedFailureStage(t *testing.T) {
@@ -265,7 +265,7 @@ func TestCallLogsOnlyAClosedFailureStage(t *testing.T) {
 	if _, err := caller.Call(context.Background(), "not-linked", "domain.get", json.RawMessage(`{}`)); err == nil {
 		t.Fatal("unlinked target unexpectedly called")
 	}
-	if logger.message != "plugin host call unavailable" || len(logger.fields) != 1 || logger.fields[0] != (sdkinterfaces.Field{Key: "stage", Value: "link_missing"}) {
+	if logger.message != "service host call unavailable" || len(logger.fields) != 1 || logger.fields[0] != (sdkinterfaces.Field{Key: "stage", Value: "link_missing"}) {
 		t.Fatalf("failure log leaked details or omitted stage: message=%q fields=%#v", logger.message, logger.fields)
 	}
 }
@@ -297,7 +297,7 @@ func TestNoEligiblePeerStageDistinguishesReadinessAndContractMismatch(t *testing
 	expires := now.Add(time.Minute)
 	directory := sdkmodels.PeerDirectory{Links: []sdkmodels.PeerLink{{
 		LinkID: "domain-link", RequiredPeerContracts: []sdkmodels.ContractRange{{
-			ContractID: "plugin.domain", MinimumVersion: "2.0.0", MaximumVersionExclusive: "3.0.0",
+			ContractID: "service.domain", MinimumVersion: "2.0.0", MaximumVersionExclusive: "3.0.0",
 		}}, Replicas: []sdkmodels.PeerDirectoryReplica{{
 			Eligibility: sdkmodels.PeerEligibilityNotReady,
 		}},

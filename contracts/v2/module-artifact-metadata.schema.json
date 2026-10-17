@@ -1,5 +1,5 @@
 {
-  "$id": "https://liapoldus.github.io/plugins/runtime/v2/module-artifact-metadata.schema.json",
+  "$id": "https://liapoldus.github.io/services/runtime/v2/module-artifact-metadata.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {

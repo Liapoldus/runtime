@@ -31,7 +31,7 @@ func rejectModuleImports(module []byte) error {
 					return ErrInvalidABI
 				}
 				fieldName, err := readWasmName(module, &offset, sectionEnd)
-				if err != nil || offset >= sectionEnd || moduleName != "liapoldus.plugin.v2" || fieldName != "call" || module[offset] != 0 {
+				if err != nil || offset >= sectionEnd || moduleName != "liapoldus.service.v2" || fieldName != "call" || module[offset] != 0 {
 					return ErrInvalidABI
 				}
 				offset++

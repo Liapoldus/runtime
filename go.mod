@@ -3,10 +3,14 @@ module github.com/Liapoldus/runtime
 go 1.26.0
 
 require (
-	github.com/Liapoldus/plugin-sdk/v2 v2.0.0
-	github.com/Liapoldus/pluginprotocol/v3 v3.0.0
+	github.com/Liapoldus/service-sdk/v2 v2.0.0
+	github.com/Liapoldus/wool/v3 v3.0.0
 	github.com/tetratelabs/wazero v1.12.0
 )
+
+replace github.com/Liapoldus/service-sdk/v2 => ../../service-sdk
+
+replace github.com/Liapoldus/wool/v3 => ../../wool
 
 require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
